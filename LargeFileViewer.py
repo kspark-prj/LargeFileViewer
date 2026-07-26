@@ -131,7 +131,7 @@ class UltimateLargeFileViewer(ctk.CTk):
         self.detected_encoding = "utf-8"
         self.filesize_text = ""
 
-        # 💡 [구조 개선] Rust 네이티브 Class 인스턴스 보유 및 가속 엔진 바인딩
+        # Rust 네이티브 Class 인스턴스 보유 및 가속 엔진 바인딩
         self.rust_core = None
         if RUST_AVAILABLE:
             self.rust_core = large_file_core.FileIndexCore()
@@ -671,22 +671,10 @@ class UltimateLargeFileViewer(ctk.CTk):
             return
 
         try:
-            # ---- 💡 [구조 개선] Rust 네이티브 클래스 질의 구간 (복사 렉 제거) ----
+            # Rust 네이티브 클래스 질의 구간
             if RUST_AVAILABLE and self.rust_core is not None:
                 try:
-                    # ⚠️ [버그 수정]: 일반 검색 모드일 때 특수문자 부근에 불필요한 이스케이프가 붙지 않도록 keyword를 그대로 대입
-                    pattern_str = keyword
-
-                    if enc.lower() == "utf-8":
-                        rust_pattern = pattern_str.encode("utf-8", errors="ignore")
-                    else:
-                        raw_bytes = pattern_str.encode(enc, errors="ignore")
-                        hex_escaped = "".join(
-                            chr(b) if b < 128 else f"\\x{b:02x}" for b in raw_bytes
-                        )
-                        rust_pattern = f"(?-u){hex_escaped}".encode("ascii")
-
-                    # 무겁게 line_offsets 파라미터를 넘기지 않고 Rust 내부 메모리에서 독점 가속 처리
+                    rust_pattern = keyword.encode(enc, errors="ignore")
                     matches, line_indices, total_found = self.rust_core.search_keyword(
                         rust_pattern,
                         is_regex,
@@ -700,12 +688,10 @@ class UltimateLargeFileViewer(ctk.CTk):
                         )
                     return
                 except Exception as rust_err:
-                    print("\n[디버그] Rust 검색 코어 실행 중 예외가 발생했습니다!")
-                    print(f"오류 내용: {rust_err}")
+                    print(f"[디버그] Rust 검색 코어 예외 발생, 백업 모드로 전환: {rust_err}")
                     traceback.print_exc()
-                    print("[디버그] 파이썬 Fallback 백업 검색 모드로 전환합니다.\n")
 
-            # ---- 🚀 파이썬 일반 폴백 백업 검색 모드 (Rust 미작동 시) ----
+            # 파이썬 일반 폴백 백업 검색 모드 (Rust 미작동 시)
             if is_regex:
                 pattern = re.compile(keyword.encode(enc, errors="ignore"), re.IGNORECASE)
                 file_size = mm.size()
@@ -853,7 +839,7 @@ class UltimateLargeFileViewer(ctk.CTk):
         self.render_view(0)
 
     def start_open_file_thread(self):
-        if self.is_indexing:
+        if self.is_indexing or self.is_searching or self.is_splitting or self.is_merging:
             return
         file_selected = filedialog.askopenfilename(
             title="대용량 텍스트 파일 선택",
@@ -901,7 +887,7 @@ class UltimateLargeFileViewer(ctk.CTk):
                     self.after(0, self.on_indexing_complete)
                 return
 
-            # ---- 💡 [구조 개선] Rust 가속 Class 코어 작동 구간 ----
+            # Rust 가속 Class 코어 작동 구간
             if RUST_AVAILABLE and self.rust_core is not None:
                 try:
                     self.current_engine_used_rust = True
@@ -923,7 +909,6 @@ class UltimateLargeFileViewer(ctk.CTk):
                                 ),
                             )
 
-                    # Rust 메모리에 인덱스를 적재시키고 최종 라인 수만 반환받음 (메모리 제로 카피)
                     self.total_lines = self.rust_core.index_file(
                         self.file_path, rust_progress_callback
                     )
@@ -935,12 +920,10 @@ class UltimateLargeFileViewer(ctk.CTk):
                         self.after(0, self.on_indexing_complete)
                     return
                 except Exception as rust_err:
-                    print("\n[디버그] Rust 인덱싱 코어 실행 중 예외가 발생했습니다!")
-                    print(f"오류 내용: {rust_err}")
+                    print(f"[디버그] Rust 인덱싱 코어 예외 발생, 백업 모드로 전환: {rust_err}")
                     traceback.print_exc()
-                    print("[디버그] 파이썬 Fallback 백업 인덱싱 모드로 전환합니다.\n")
 
-            # ---- 🚀 파이썬 일반 폴백 백업 인덱싱 모드 ----
+            # 파이썬 일반 폴백 백업 인덱싱 모드
             self.current_engine_used_rust = False
             self.line_offsets = [0]
             self.file_handle = open(self.file_path, "rb")
@@ -1051,6 +1034,7 @@ class UltimateLargeFileViewer(ctk.CTk):
 
     def close_file(self):
         if self.is_indexing or self.is_searching or self.is_splitting or self.is_merging:
+            messagebox.showwarning("경고", "작업이 진행 중일 때는 파일을 닫을 수 없습니다.")
             return
 
         if self.search_panel_visible:
@@ -1119,27 +1103,18 @@ class UltimateLargeFileViewer(ctk.CTk):
         try:
             file_size = mm.size()
             text_parts = []
-            for idx in range(start_line, end_line):
-                if self.mmap_obj is None:
-                    break
+            count = end_line - start_line
 
-                # 💡 [구조 개선] 오프셋 계산 매핑 정합성 보완 (or 0 안전장치 가동)
-                if self.current_engine_used_rust and self.rust_core is not None:
-                    start_offset = max(0, self.rust_core.get_offset(idx) or 0)
-                    end_offset = max(
-                        start_offset,
-                        (self.rust_core.get_offset(idx + 1) or file_size)
-                        if (idx + 1 < self.total_lines)
-                        else file_size,
-                    )
-                else:
-                    start_offset = self.line_offsets[idx]
-                    end_offset = (
-                        self.line_offsets[idx + 1] if (idx + 1 < self.total_lines) else file_size
-                    )
+            # 오프셋 배치 가져오기 적용 (IPC 호출 수 극적 감축)
+            if self.current_engine_used_rust and self.rust_core is not None:
+                offsets = self.rust_core.get_offsets_range(start_line, count + 1)
+            else:
+                offsets = self.line_offsets[start_line : start_line + count + 1]
 
-                if start_offset is None:
-                    continue
+            for i in range(count):
+                idx = start_line + i
+                start_offset = offsets[i] if i < len(offsets) else 0
+                end_offset = offsets[i + 1] if (i + 1) < len(offsets) else file_size
 
                 line_data = mm[start_offset:end_offset]
                 decoded_line = line_data.decode(enc, errors="ignore")
@@ -1302,10 +1277,9 @@ class UltimateLargeFileViewer(ctk.CTk):
                 last_ui_update_time = time.time()
 
                 while current_line_idx < total_offsets - 1:
-                    if self.mmap_obj is None:  # 중간 해제 정합성 체크
+                    if self.mmap_obj is None:
                         break
 
-                    # 오프셋 취득 로직 구조화 적용 및 Rust 안전장치(or 0)
                     if self.current_engine_used_rust and self.rust_core is not None:
                         start_offset = max(0, self.rust_core.get_offset(current_line_idx) or 0)
                     else:

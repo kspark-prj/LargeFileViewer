@@ -1,5 +1,4 @@
 use pyo3::prelude::*;
-use pyo3::types::PyBytes;
 use memmap2::Mmap;
 use std::fs::File;
 use std::path::Path;
@@ -32,17 +31,15 @@ impl FileIndexCore {
 
         self.file_path = file_path;
         self.file_size = mmap.len();
-        self.line_offsets = vec![0u64];
+        let mut offsets = vec![0u64];
 
         if self.file_size == 0 {
+            self.line_offsets = offsets;
             return Ok(0);
         }
 
         let chunk_size = 64 * 1024 * 1024;
         let mut last_reported_pct = -1;
-
-        // 거대한 루프 전체를 GIL 해제 상태로 안전하게 실행
-        let mut offsets = std::mem::take(&mut self.line_offsets);
         let file_size = self.file_size;
 
         py.allow_threads(|| {
@@ -60,8 +57,6 @@ impl FileIndexCore {
                     if pct > last_reported_pct {
                         last_reported_pct = pct;
                         let line_count = offsets.len();
-
-                        // 파이썬 UI 업데이트를 위한 콜백 시에만 잠깐 GIL 획득
                         Python::with_gil(|py_callback| {
                             let _ = callback.call1(py_callback, (pct, line_count));
                         });
@@ -75,7 +70,16 @@ impl FileIndexCore {
         Ok(self.line_offsets.len())
     }
 
-    /// Rust 내부 메모리의 line_offsets를 참조하여 초고속 검색을 수행합니다. (파이썬 데이터 복사 0)
+    /// [성능 개선] 범위 단위 오프셋 일괄 반환 (파이썬 CFFI 호출 횟수 극적 감소)
+    fn get_offsets_range(&self, start_idx: usize, count: usize) -> Vec<u64> {
+        let end_idx = std::cmp::min(start_idx + count, self.line_offsets.len());
+        if start_idx >= self.line_offsets.len() {
+            return vec![];
+        }
+        self.line_offsets[start_idx..end_idx].to_vec()
+    }
+
+    /// [정합성 보완] 대소문자 무시/인코딩 무관 초고속 검색 수행
     fn search_keyword(
         &self,
         py: Python<'_>,
@@ -90,68 +94,31 @@ impl FileIndexCore {
         let mut matches = Vec::new();
         let mut line_indices = Vec::new();
         let mut total_found = 0;
-
         let line_offsets = &self.line_offsets;
 
-        // 헬퍼 클로저
-        let get_line_string = |idx: usize, offsets: &[u64], map_data: &[u8]| -> String {
-            let start = offsets[idx] as usize;
-            let end = if idx + 1 < offsets.len() { offsets[idx + 1] as usize } else { map_data.len() };
-            let line_bytes = &map_data[start..end];
-            let trimmed_bytes = if line_bytes.ends_with(b"\r\n") {
-                &line_bytes[..line_bytes.len() - 2]
-            } else if line_bytes.ends_with(b"\n") {
-                &line_bytes[..line_bytes.len() - 1]
-            } else {
-                line_bytes
-            };
-            String::from_utf8_lossy(trimmed_bytes).into_owned()
-        };
-
-        // GIL 해제 후 검색 연산 수행
         py.allow_threads(|| {
-            if is_regex {
-                if let Ok(pattern_str) = std::str::from_utf8(&pattern) {
-                    let mut builder = regex::bytes::RegexBuilder::new(pattern_str);
-                    if case_insensitive { builder.case_insensitive(true); }
-
-                    if let Ok(re) = builder.build() {
-                        let mut current_search_start = 0;
-                        let mut last_line_idx = None;
-
-                        for mat in re.find_iter(&mmap) {
-                            let offset = mat.start() as u64;
-                            let search_slice = &line_offsets[current_search_start..];
-
-                            let line_idx = match search_slice.binary_search(&offset) {
-                                Ok(idx) => current_search_start + idx,
-                                Err(idx) => if idx > 0 { current_search_start + idx - 1 } else { current_search_start },
-                            };
-
-                            current_search_start = line_idx;
-
-                            if Some(line_idx) != last_line_idx {
-                                total_found += 1;
-                                if line_indices.len() < 2000 {
-                                    line_indices.push(line_idx);
-                                    matches.push(get_line_string(line_idx, line_offsets, &mmap));
-                                }
-                                last_line_idx = Some(line_idx);
-                            }
-                            if total_found >= 2000 { break; }
-                        }
-                    }
-                }
+            // 바이트 기반 정규식 패턴 생성
+            let re_result = if is_regex {
+                let pattern_str = String::from_utf8_lossy(&pattern);
+                let mut builder = regex::bytes::RegexBuilder::new(&pattern_str);
+                builder.case_insensitive(case_insensitive);
+                builder.build()
             } else {
-                let finder = memchr::memmem::Finder::new(&pattern);
+                let escaped_pattern = regex::escape(&String::from_utf8_lossy(&pattern));
+                let mut builder = regex::bytes::RegexBuilder::new(&escaped_pattern);
+                builder.case_insensitive(case_insensitive);
+                builder.build()
+            };
+
+            if let Ok(re) = re_result {
                 let mut current_search_start = 0;
                 let mut last_line_idx = None;
 
-                for offset in finder.find_iter(&mmap) {
-                    let offset_u64 = offset as u64;
+                for mat in re.find_iter(&mmap) {
+                    let offset = mat.start() as u64;
                     let search_slice = &line_offsets[current_search_start..];
 
-                    let line_idx = match search_slice.binary_search(&offset_u64) {
+                    let line_idx = match search_slice.binary_search(&offset) {
                         Ok(idx) => current_search_start + idx,
                         Err(idx) => if idx > 0 { current_search_start + idx - 1 } else { current_search_start },
                     };
@@ -162,7 +129,8 @@ impl FileIndexCore {
                         total_found += 1;
                         if line_indices.len() < 2000 {
                             line_indices.push(line_idx);
-                            matches.push(get_line_string(line_idx, line_offsets, &mmap));
+                            // Python UI 호환성을 위해 Line 라벨 형태로 통일
+                            matches.push(format!("Line {}", line_idx + 1));
                         }
                         last_line_idx = Some(line_idx);
                     }
@@ -174,7 +142,6 @@ impl FileIndexCore {
         Ok((matches, line_indices, total_found))
     }
 
-    /// 파일 뷰어 연산(특정 라인 범위 읽기) 최적화를 위해 특정 라인의 오프셋만 파이썬에 반환
     fn get_offset(&self, index: usize) -> Option<u64> {
         self.line_offsets.get(index).copied()
     }
