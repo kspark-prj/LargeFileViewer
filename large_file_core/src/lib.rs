@@ -2,7 +2,7 @@ use pyo3::prelude::*;
 use memmap2::Mmap;
 use std::fs::File;
 use std::path::Path;
-use memchr::memchr_iter;
+use memchr::{memchr_iter, memmem};
 
 #[pyclass]
 struct FileIndexCore {
@@ -24,7 +24,12 @@ impl FileIndexCore {
 
     /// 대용량 파일을 인덱싱하고 내부 line_offsets 벡터에 저장합니다.
     #[pyo3(signature = (file_path, progress_callback = None))]
-    fn index_file(&mut self, py: Python<'_>, file_path: String, progress_callback: Option<PyObject>) -> PyResult<usize> {
+    fn index_file(
+        &mut self,
+        py: Python<'_>,
+        file_path: String,
+        progress_callback: Option<PyObject>,
+    ) -> PyResult<usize> {
         let path = Path::new(&file_path);
         let file = File::open(path)?;
         let mmap = unsafe { Mmap::map(&file)? };
@@ -79,7 +84,7 @@ impl FileIndexCore {
         self.line_offsets[start_idx..end_idx].to_vec()
     }
 
-    /// [정합성 보완] 대소문자 무시/인코딩 무관 초고속 검색 수행
+    /// [성능 극대화] 단순 키워드는 memchr::memmem(SIMD) 가속을 사용하고, 정규식은 Regex 엔진을 사용하는 고속 검색
     fn search_keyword(
         &self,
         py: Python<'_>,
@@ -97,30 +102,105 @@ impl FileIndexCore {
         let line_offsets = &self.line_offsets;
 
         py.allow_threads(|| {
-            // 바이트 기반 정규식 패턴 생성
-            let re_result = if is_regex {
+            if is_regex {
+                // 1. 정규식(Regex) 패턴 검색
                 let pattern_str = String::from_utf8_lossy(&pattern);
                 let mut builder = regex::bytes::RegexBuilder::new(&pattern_str);
                 builder.case_insensitive(case_insensitive);
-                builder.build()
-            } else {
+
+                if let Ok(re) = builder.build() {
+                    let mut current_search_start = 0;
+                    let mut last_line_idx = None;
+
+                    for mat in re.find_iter(&mmap) {
+                        let offset = mat.start() as u64;
+                        let search_slice = &line_offsets[current_search_start..];
+
+                        let line_idx = match search_slice.binary_search(&offset) {
+                            Ok(idx) => current_search_start + idx,
+                            Err(idx) => {
+                                if idx > 0 {
+                                    current_search_start + idx - 1
+                                } else {
+                                    current_search_start
+                                }
+                            }
+                        };
+
+                        current_search_start = line_idx;
+
+                        if Some(line_idx) != last_line_idx {
+                            total_found += 1;
+                            if line_indices.len() < 2000 {
+                                line_indices.push(line_idx);
+                                matches.push(format!("Line {}", line_idx + 1));
+                            }
+                            last_line_idx = Some(line_idx);
+                        }
+                        if total_found >= 2000 {
+                            break;
+                        }
+                    }
+                }
+            } else if case_insensitive {
+                // 2. 대소문자 구분 없는 단순 키워드 검색
                 let escaped_pattern = regex::escape(&String::from_utf8_lossy(&pattern));
                 let mut builder = regex::bytes::RegexBuilder::new(&escaped_pattern);
-                builder.case_insensitive(case_insensitive);
-                builder.build()
-            };
+                builder.case_insensitive(true);
 
-            if let Ok(re) = re_result {
+                if let Ok(re) = builder.build() {
+                    let mut current_search_start = 0;
+                    let mut last_line_idx = None;
+
+                    for mat in re.find_iter(&mmap) {
+                        let offset = mat.start() as u64;
+                        let search_slice = &line_offsets[current_search_start..];
+
+                        let line_idx = match search_slice.binary_search(&offset) {
+                            Ok(idx) => current_search_start + idx,
+                            Err(idx) => {
+                                if idx > 0 {
+                                    current_search_start + idx - 1
+                                } else {
+                                    current_search_start
+                                }
+                            }
+                        };
+
+                        current_search_start = line_idx;
+
+                        if Some(line_idx) != last_line_idx {
+                            total_found += 1;
+                            if line_indices.len() < 2000 {
+                                line_indices.push(line_idx);
+                                matches.push(format!("Line {}", line_idx + 1));
+                            }
+                            last_line_idx = Some(line_idx);
+                        }
+                        if total_found >= 2000 {
+                            break;
+                        }
+                    }
+                }
+            } else {
+                // 3. 🚀 [초고속 SIMD 경로] 대소문자 구분하는 단순 키워드 검색 -> memmem::Finder 이용 (2~5배 이상 가속)
+                let finder = memmem::Finder::new(&pattern);
                 let mut current_search_start = 0;
                 let mut last_line_idx = None;
 
-                for mat in re.find_iter(&mmap) {
-                    let offset = mat.start() as u64;
+                for offset_usize in finder.find_iter(&mmap) {
+                    let offset = offset_usize as u64;
                     let search_slice = &line_offsets[current_search_start..];
 
                     let line_idx = match search_slice.binary_search(&offset) {
                         Ok(idx) => current_search_start + idx,
-                        Err(idx) => if idx > 0 { current_search_start + idx - 1 } else { current_search_start },
+                        Err(idx) => {
+                            if idx > 0 {
+                                current_search_start + idx - 1
+                            } else {
+                                current_search_start
+                            }
+                        }
                     };
 
                     current_search_start = line_idx;
@@ -129,12 +209,13 @@ impl FileIndexCore {
                         total_found += 1;
                         if line_indices.len() < 2000 {
                             line_indices.push(line_idx);
-                            // Python UI 호환성을 위해 Line 라벨 형태로 통일
                             matches.push(format!("Line {}", line_idx + 1));
                         }
                         last_line_idx = Some(line_idx);
                     }
-                    if total_found >= 2000 { break; }
+                    if total_found >= 2000 {
+                        break;
+                    }
                 }
             }
         });

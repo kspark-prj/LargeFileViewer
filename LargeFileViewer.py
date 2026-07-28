@@ -120,7 +120,7 @@ class UltimateLargeFileViewer(ctk.CTk):
     def __init__(self):
         super().__init__()
 
-        self.title("Ultimate Large File Viewer & Searcher (Rust Class-Optimized) V1.1.0")
+        self.title("Ultimate Large File Viewer & Searcher (Rust Class-Optimized) V1.2.0")
         self.geometry("1150x850")
         self.minsize(900, 650)
 
