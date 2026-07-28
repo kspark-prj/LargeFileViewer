@@ -3,6 +3,7 @@ __pycache__/
 *.py[cod]
 *$py.class
 *.pyo
+*.spec
 
 # Rust build artifacts
 large_file_core/target/
