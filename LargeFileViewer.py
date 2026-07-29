@@ -14,22 +14,16 @@ try:
     import large_file_core
 
     RUST_AVAILABLE = True
-    print("[LargeFileViewer] Rust 가속 구조적 코어가 활성화되었습니다. (Rust class core is ACTIVE)")
+    print("[LargeFileViewer] Rust 가속 코어가 활성화되었습니다.")
 except ImportError as e:
     RUST_AVAILABLE = False
-    print(
-        f"[LargeFileViewer] Rust 코어가 빌드되지 않았거나 로드할 수 없습니다. 파이썬 폴백 모드로 동작합니다. 원인: {e}"
-    )
+    print(f"[LargeFileViewer] Rust 코어를 로드할 수 없어 파이썬 폴백 모드로 동작합니다: {e}")
 
-
-# ---- 전역 테마 설정 (다크 모드로 강제 고정) ----
 ctk.set_appearance_mode("Dark")
 ctk.set_default_color_theme("blue")
 
 
 class CTkCustomMenu(ctk.CTkFrame):
-    """네이티브 tk.Menu 대신 사용하는 CustomTkinter 기반 다크 테마 드롭다운 메뉴."""
-
     def __init__(self, parent, master_window, items):
         super().__init__(
             parent,
@@ -49,7 +43,6 @@ class CTkCustomMenu(ctk.CTkFrame):
                 sep.pack(fill="x", padx=5, pady=4)
             else:
                 target_cmd = item.get("command")
-
                 btn = ctk.CTkButton(
                     self,
                     text=item["label"],
@@ -94,25 +87,17 @@ class CTkCustomMenu(ctk.CTkFrame):
     def _on_outside_click(self, event):
         if not self.winfo_exists():
             return
-
         widget = event.widget
-
         try:
-            x = event.x_root
-            y = event.y_root
-            menu_x = self.winfo_rootx()
-            menu_y = self.winfo_rooty()
-            menu_w = self.winfo_width()
-            menu_h = self.winfo_height()
-
-            if menu_x <= x <= (menu_x + menu_w) and menu_y <= y <= (menu_y + menu_h):
+            x, y = event.x_root, event.y_root
+            mx, my = self.winfo_rootx(), self.winfo_rooty()
+            mw, mh = self.winfo_width(), self.winfo_height()
+            if mx <= x <= (mx + mw) and my <= y <= (my + mh):
                 return
         except Exception:
             pass
-
         if widget in [self.master_window.menu_file_btn, self.master_window.menu_tools_btn]:
             return
-
         self.hide()
 
 
@@ -120,7 +105,7 @@ class UltimateLargeFileViewer(ctk.CTk):
     def __init__(self):
         super().__init__()
 
-        self.title("Ultimate Large File Viewer & Searcher (Rust Class-Optimized) V1.2.0")
+        self.title("Ultimate Large File Viewer & Searcher (SIMD Super-Fast) V1.5.0")
         self.geometry("1150x850")
         self.minsize(900, 650)
 
@@ -131,14 +116,11 @@ class UltimateLargeFileViewer(ctk.CTk):
         self.detected_encoding = "utf-8"
         self.filesize_text = ""
 
-        # Rust 네이티브 Class 인스턴스 보유 및 가속 엔진 바인딩
         self.rust_core = None
         if RUST_AVAILABLE:
             self.rust_core = large_file_core.FileIndexCore()
 
-        # 파이썬 일반 폴백 모드(Rust 미활성 시) 전용 인덱스 배열
         self.line_offsets = []
-
         self.current_engine_used_rust = False
 
         self.is_indexing = False
@@ -158,7 +140,6 @@ class UltimateLargeFileViewer(ctk.CTk):
         self.setup_dark_scrollbar_style()
         self.setup_custom_dark_menu()
 
-        # ---- 상단 패널: 파일 선택 및 인코딩 구역 ----
         self.top_frame = ctk.CTkFrame(self)
         self.top_frame.pack(fill="x", padx=15, pady=(10, 5))
 
@@ -209,7 +190,6 @@ class UltimateLargeFileViewer(ctk.CTk):
         )
         self.lbl_file.pack(side="left", fill="x", expand=True, padx=5, pady=10)
 
-        # ---- 중단 패널: HEAD / TAIL / 전체보기 탭 구역 ----
         self.tab_panel_frame = ctk.CTkFrame(self)
 
         self.view_mode_var = ctk.StringVar(value="전체보기 (FULL)")
@@ -246,7 +226,6 @@ class UltimateLargeFileViewer(ctk.CTk):
         )
         self.btn_apply_filter.pack(side="left", padx=10, pady=10)
 
-        # ---- 메인 본문 및 검색 레이아웃 (좌우 분할) ----
         self.body_container = ctk.CTkFrame(self, fg_color="transparent")
         self.body_container.pack(fill="both", expand=True, padx=15, pady=(5, 15))
 
@@ -293,18 +272,16 @@ class UltimateLargeFileViewer(ctk.CTk):
             style="Dark.Vertical.TScrollbar",
         )
         self.v_scrollbar.pack(side="right", fill="y")
-
         self.text_area.bind("<Configure>", self.update_visible_count)
 
-        # ---- [우측 영역] 단어 고속 검색 사이드 패널 ----
+        # 검색 패널 (정규식 선택 옵션 추가)
         self.search_panel_frame = ctk.CTkFrame(self.body_container, width=260)
-
         self.search_header_frame = ctk.CTkFrame(self.search_panel_frame, fg_color="transparent")
         self.search_header_frame.pack(fill="x", padx=10, pady=(10, 2))
 
         self.lbl_search_title = ctk.CTkLabel(
             self.search_header_frame,
-            text="🔍 단어 / 패턴 검색",
+            text="⚡ 초고속 검색 Engine",
             font=("Malgun Gothic", 12, "bold"),
             text_color="#2b73b8",
         )
@@ -328,7 +305,7 @@ class UltimateLargeFileViewer(ctk.CTk):
 
         self.entry_search = ctk.CTkEntry(
             self.search_ctrl_frame,
-            placeholder_text="검색어 또는 정규식...",
+            placeholder_text="검색 키워드/정규식 입력...",
             font=("Malgun Gothic", 12),
             height=28,
         )
@@ -345,19 +322,21 @@ class UltimateLargeFileViewer(ctk.CTk):
         )
         self.btn_search.pack(side="right", padx=(0, 5))
 
-        self.search_opt_frame = ctk.CTkFrame(self.search_panel_frame, fg_color="transparent")
-        self.search_opt_frame.pack(fill="x", padx=15, pady=(0, 4))
+        # [신규 추가] 정규식 옵션 체크박스 (기본: 미선택)
+        self.search_options_frame = ctk.CTkFrame(self.search_panel_frame, fg_color="transparent")
+        self.search_options_frame.pack(fill="x", padx=15, pady=(2, 2))
 
-        self.regex_var = ctk.BooleanVar(value=False)
-        self.chk_regex = ctk.CTkCheckBox(
-            self.search_opt_frame,
-            text="정규식(Regex) 사용",
-            variable=self.regex_var,
+        self.use_regex_var = ctk.BooleanVar(value=False)
+        self.chk_use_regex = ctk.CTkCheckBox(
+            self.search_options_frame,
+            text="정규식 (Regex)",
+            variable=self.use_regex_var,
             font=("Malgun Gothic", 11),
-            checkbox_width=16,
-            checkbox_height=16,
+            checkbox_width=18,
+            checkbox_height=18,
+            border_width=2,
         )
-        self.chk_regex.pack(side="left")
+        self.chk_use_regex.pack(side="left")
 
         self.nav_frame = ctk.CTkFrame(self.search_panel_frame, fg_color="transparent")
         self.nav_frame.pack(fill="x", padx=10, pady=2)
@@ -460,9 +439,7 @@ class UltimateLargeFileViewer(ctk.CTk):
         try:
             with open(file_path, "rb") as f:
                 raw = f.read(1024 * 64)
-                if not raw:
-                    return "utf-8"
-                if raw.startswith(b"\xef\xbb\xbf"):
+                if not raw or raw.startswith(b"\xef\xbb\xbf"):
                     return "utf-8"
                 if raw.startswith(b"\xff\xfe") or raw.startswith(b"\xfe\xff"):
                     return "utf-16"
@@ -499,7 +476,8 @@ class UltimateLargeFileViewer(ctk.CTk):
 
         target_line = self.search_match_lines[idx]
         keyword = self.entry_search.get().strip()
-        self.render_view(max(0, target_line - 2), keyword)
+        use_regex = self.use_regex_var.get()
+        self.render_view(max(0, target_line - 2), keyword, use_regex=use_regex)
 
     def select_prev(self):
         current = self.result_listbox.curselection()
@@ -640,9 +618,14 @@ class UltimateLargeFileViewer(ctk.CTk):
             messagebox.showwarning("검색 경고", "검색할 내용을 입력해 주세요.")
             return
 
+        use_regex = self.use_regex_var.get()
+
         self.is_searching = True
         self.btn_search.configure(state="disabled")
-        self.lbl_search_status.configure(text="검색 중...", text_color="#ffcc00")
+        search_type_lbl = "정규식" if use_regex else "SIMD"
+        self.lbl_search_status.configure(
+            text=f"{search_type_lbl} 가속 검색 중...", text_color="#ffcc00"
+        )
         self.result_listbox.delete(0, "end")
         self.search_match_lines = []
 
@@ -651,13 +634,14 @@ class UltimateLargeFileViewer(ctk.CTk):
         self.filter_start = 0
         self.filter_end = self.total_lines
 
-        is_regex = self.regex_var.get()
         t = threading.Thread(
-            target=self.search_keyword_worker, args=(keyword, is_regex), daemon=True
+            target=self.search_keyword_worker,
+            args=(keyword, use_regex),
+            daemon=True,
         )
         t.start()
 
-    def search_keyword_worker(self, keyword, is_regex):
+    def search_keyword_worker(self, keyword, use_regex):
         matches = []
         line_indices = []
         total_found = 0
@@ -671,14 +655,12 @@ class UltimateLargeFileViewer(ctk.CTk):
             return
 
         try:
-            # Rust 네이티브 클래스 질의 구간
+            # 🚀 [Rust 고성능 검색 코어 호출]
             if RUST_AVAILABLE and self.rust_core is not None:
                 try:
                     rust_pattern = keyword.encode(enc, errors="ignore")
                     matches, line_indices, total_found = self.rust_core.search_keyword(
-                        rust_pattern,
-                        is_regex,
-                        True,  # case_insensitive
+                        rust_pattern, use_regex
                     )
 
                     if self.winfo_exists():
@@ -688,37 +670,35 @@ class UltimateLargeFileViewer(ctk.CTk):
                         )
                     return
                 except Exception as rust_err:
-                    print(f"[디버그] Rust 검색 코어 예외 발생, 백업 모드로 전환: {rust_err}")
+                    print(f"[디버그] Rust 검색 예외 발생, 파이썬 모드로 전환: {rust_err}")
                     traceback.print_exc()
 
-            # 파이썬 일반 폴백 백업 검색 모드 (Rust 미작동 시)
-            if is_regex:
-                pattern = re.compile(keyword.encode(enc, errors="ignore"), re.IGNORECASE)
-                file_size = mm.size()
+            # Python 매칭 백업 (Fallback)
+            k_bytes = keyword.encode(enc, errors="ignore")
+            matched_offsets = []
+            file_size = mm.size()
 
-                for idx in range(self.total_lines):
-                    if self.mmap_obj is None:
-                        break
-                    if idx % 20000 == 0:
-                        time.sleep(0.001)
-
-                    start_offset = self.line_offsets[idx]
-                    end_offset = (
-                        self.line_offsets[idx + 1] if (idx + 1 < self.total_lines) else file_size
-                    )
-                    line_data = mm[start_offset:end_offset]
-
-                    if pattern.search(line_data):
-                        total_found += 1
-                        if len(matches) < 2000:
-                            matches.append(f"Line {idx + 1:,}")
-                            line_indices.append(idx)
+            if use_regex:
+                try:
+                    pattern_re = re.compile(k_bytes, re.MULTILINE)
+                    for m in pattern_re.finditer(mm):
+                        matched_offsets.append(m.start())
+                        if len(matched_offsets) >= 2000:
+                            break
+                except re.error:
+                    if self.winfo_exists():
+                        self.after(
+                            0,
+                            lambda: messagebox.showerror(
+                                "정규식 오류",
+                                "올바르지 않은 정규식 패턴입니다.",
+                            ),
+                        )
+                    self.after(0, lambda: self.btn_search.configure(state="normal"))
+                    self.is_searching = False
+                    return
             else:
-                k_bytes = keyword.lower().encode(enc, errors="ignore")
                 search_pos = 0
-                file_size = mm.size()
-                matched_offsets = []
-
                 while search_pos < file_size:
                     if self.mmap_obj is None:
                         break
@@ -730,16 +710,16 @@ class UltimateLargeFileViewer(ctk.CTk):
                     if len(matched_offsets) >= 2000:
                         break
 
-                if matched_offsets:
-                    last_line_idx = -1
-                    for offset in matched_offsets:
-                        line_idx = bisect.bisect_right(self.line_offsets, offset) - 1
-                        if line_idx != last_line_idx:
-                            total_found += 1
-                            if len(matches) < 2000:
-                                matches.append(f"Line {line_idx + 1:,}")
-                                line_indices.append(line_idx)
-                            last_line_idx = line_idx
+            if matched_offsets:
+                last_line_idx = -1
+                for offset in matched_offsets:
+                    line_idx = bisect.bisect_right(self.line_offsets, offset) - 1
+                    if line_idx != last_line_idx:
+                        total_found += 1
+                        if len(matches) < 2000:
+                            matches.append(f"Line {line_idx + 1:,}")
+                            line_indices.append(line_idx)
+                        last_line_idx = line_idx
 
         except Exception as e:
             print(f"Search exception: {e}")
@@ -782,6 +762,7 @@ class UltimateLargeFileViewer(ctk.CTk):
         list_idx = selection[0]
         target_line = self.search_match_lines[list_idx]
         keyword = self.entry_search.get().strip()
+        use_regex = self.use_regex_var.get()
 
         self.view_mode_var.set("전체보기 (FULL)")
         self.toggle_tab_options(show=False)
@@ -790,7 +771,7 @@ class UltimateLargeFileViewer(ctk.CTk):
         self.current_start_line = max(0, target_line - 2)
 
         self.set_scroll_bar_position(self.current_start_line)
-        self.render_view(self.current_start_line, highlight_keyword=keyword)
+        self.render_view(self.current_start_line, highlight_keyword=keyword, use_regex=use_regex)
 
     def toggle_tab_options(self, show=True):
         if show:
@@ -887,7 +868,6 @@ class UltimateLargeFileViewer(ctk.CTk):
                     self.after(0, self.on_indexing_complete)
                 return
 
-            # Rust 가속 Class 코어 작동 구간
             if RUST_AVAILABLE and self.rust_core is not None:
                 try:
                     self.current_engine_used_rust = True
@@ -920,10 +900,9 @@ class UltimateLargeFileViewer(ctk.CTk):
                         self.after(0, self.on_indexing_complete)
                     return
                 except Exception as rust_err:
-                    print(f"[디버그] Rust 인덱싱 코어 예외 발생, 백업 모드로 전환: {rust_err}")
+                    print(f"[디버그] Rust 인덱싱 코어 예외 발생, 파이썬 모드로 전환: {rust_err}")
                     traceback.print_exc()
 
-            # 파이썬 일반 폴백 백업 인덱싱 모드
             self.current_engine_used_rust = False
             self.line_offsets = [0]
             self.file_handle = open(self.file_path, "rb")
@@ -973,7 +952,6 @@ class UltimateLargeFileViewer(ctk.CTk):
             if "[자동 감지" in self.encoding_var.get()
             else self.encoding_var.get()
         )
-
         mode_label = " (Rust 가속)" if is_rust else " (파이썬 모드)"
 
         self.lbl_file.configure(
@@ -1000,7 +978,6 @@ class UltimateLargeFileViewer(ctk.CTk):
             if "[자동 감지" in self.encoding_var.get()
             else self.encoding_var.get()
         )
-
         mode_label = " (Rust 가속 완료)" if self.current_engine_used_rust else " (파이썬 완료)"
 
         self.lbl_file.configure(
@@ -1074,7 +1051,7 @@ class UltimateLargeFileViewer(ctk.CTk):
                 self.render_view(self.current_start_line)
                 self.set_scroll_bar_position(self.current_start_line)
 
-    def render_view(self, start_line, highlight_keyword=None):
+    def render_view(self, start_line, highlight_keyword=None, use_regex=False):
         if not self.file_path or self.total_lines == 0 or self.mmap_obj is None:
             return
 
@@ -1105,7 +1082,6 @@ class UltimateLargeFileViewer(ctk.CTk):
             text_parts = []
             count = end_line - start_line
 
-            # 오프셋 배치 가져오기 적용 (IPC 호출 수 극적 감축)
             if self.current_engine_used_rust and self.rust_core is not None:
                 offsets = self.rust_core.get_offsets_range(start_line, count + 1)
             else:
@@ -1123,10 +1099,10 @@ class UltimateLargeFileViewer(ctk.CTk):
             full_text = "".join(text_parts)
             self.text_area.insert("end", full_text)
 
+            # 키워드 강조 (정규식 지원 현행화)
             if highlight_keyword:
                 self.text_area.tag_config("highlight", background="#d4d420", foreground="#000000")
                 search_start = "1.0"
-                is_regex = self.regex_var.get()
 
                 while True:
                     match_count = tk.IntVar()
@@ -1134,8 +1110,8 @@ class UltimateLargeFileViewer(ctk.CTk):
                         highlight_keyword,
                         search_start,
                         stopindex="end",
-                        nocase=True,
-                        regexp=is_regex,
+                        nocase=False,
+                        regexp=use_regex,
                         count=match_count,
                     )
                     if not pos:
