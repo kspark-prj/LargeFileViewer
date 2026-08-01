@@ -14,7 +14,7 @@ try:
     import large_file_core
 
     RUST_AVAILABLE = True
-    print("[LargeFileViewer] Rust 가속 코어가 활성화되었습니다.")
+    print("[LargeFileViewer] Rust 멀티스레드/SIMD 가속 코어가 활성화되었습니다.")
 except ImportError as e:
     RUST_AVAILABLE = False
     print(f"[LargeFileViewer] Rust 코어를 로드할 수 없어 파이썬 폴백 모드로 동작합니다: {e}")
@@ -105,7 +105,7 @@ class UltimateLargeFileViewer(ctk.CTk):
     def __init__(self):
         super().__init__()
 
-        self.title("Ultimate Large File Viewer & Searcher (SIMD Super-Fast) V1.7.0")
+        self.title("Ultimate Large File Viewer & Searcher (SIMD Super-Fast) V1.8.0")
         self.geometry("1150x850")
         self.minsize(900, 650)
 
@@ -116,7 +116,12 @@ class UltimateLargeFileViewer(ctk.CTk):
         self.detected_encoding = "utf-8"
         self.filesize_text = ""
 
-        self.rust_lock = threading.Lock()  # Rust 객체 동시 접근 방지용 락
+        # [기법 2: Prefetching 구현을 위한 인메모리 렌더링 캐시]
+        self.prefetch_buffer = {}
+        self.prefetch_range = (0, 0)
+        self.prefetch_margin = 100  # 위아래로 100줄씩 프리페칭
+
+        self.rust_lock = threading.Lock()
         self.rust_core = None
         if RUST_AVAILABLE:
             self.rust_core = large_file_core.FileIndexCore()
@@ -133,7 +138,6 @@ class UltimateLargeFileViewer(ctk.CTk):
         self.follow_timer = None
         self.last_known_file_size = 0
 
-        # 드래그 선택 중 렌더링 스킵 플래그
         self.is_selecting = False
 
         self.file_handle = None
@@ -203,7 +207,12 @@ class UltimateLargeFileViewer(ctk.CTk):
         self.view_mode_var = ctk.StringVar(value="전체보기 (FULL)")
         self.tab_selector = ctk.CTkSegmentedButton(
             self.tab_panel_frame,
-            values=["앞부분 보기 (HEAD)", "뒷부분 보기 (TAIL)", "실시간 추적 (FOLLOW)", "전체보기 (FULL)"],
+            values=[
+                "앞부분 보기 (HEAD)",
+                "뒷부분 보기 (TAIL)",
+                "실시간 추적 (FOLLOW)",
+                "전체보기 (FULL)",
+            ],
             variable=self.view_mode_var,
             font=("Malgun Gothic", 12, "bold"),
             command=self.on_tab_changed,
@@ -213,7 +222,9 @@ class UltimateLargeFileViewer(ctk.CTk):
         self.tab_option_frame = ctk.CTkFrame(self.tab_panel_frame, fg_color="transparent")
         self.tab_option_frame.pack(side="left", fill="y", padx=10)
 
-        self.lbl_filter_lines = ctk.CTkLabel(self.tab_option_frame, text="출력 줄 수:", font=("Malgun Gothic", 11))
+        self.lbl_filter_lines = ctk.CTkLabel(
+            self.tab_option_frame, text="출력 줄 수:", font=("Malgun Gothic", 11)
+        )
         self.lbl_filter_lines.pack(side="left", padx=5, pady=10)
 
         self.entry_filter_lines = ctk.CTkEntry(self.tab_option_frame, width=70, justify="center")
@@ -270,7 +281,6 @@ class UltimateLargeFileViewer(ctk.CTk):
         self.text_area.bind("<Control-c>", self.safe_copy)
         self.text_area.bind("<Control-C>", self.safe_copy)
 
-        # 드래그 선택 시 튀는 현상 방지를 위한 이벤트 바인딩
         self.text_area.bind("<Button-1>", self._on_text_drag_start)
         self.text_area.bind("<ButtonRelease-1>", self._on_text_drag_end)
 
@@ -446,7 +456,6 @@ class UltimateLargeFileViewer(ctk.CTk):
             elif current_size < self.last_known_file_size:
                 self._reindex_file_for_follow()
             else:
-                # 2번: 스마트 스크롤 제어 (사용자가 맨 아래 근처를 보고 있을 때만 스크롤 고정)
                 scroll_pos = self.v_scrollbar.get()
                 if scroll_pos[1] >= 0.90:
                     self.apply_tab_filter()
@@ -501,7 +510,6 @@ class UltimateLargeFileViewer(ctk.CTk):
                 self.mmap_obj = mmap.mmap(self.file_handle.fileno(), 0, access=mmap.ACCESS_READ)
 
                 if self.winfo_exists():
-                    # 2번: 스마트 스크롤 제어 적용
                     scroll_pos = self.v_scrollbar.get()
                     if scroll_pos[1] >= 0.90:
                         self.after(0, self.apply_tab_filter)
@@ -534,7 +542,10 @@ class UltimateLargeFileViewer(ctk.CTk):
                 else:
                     self.line_offsets = [0]
                     file_pos = 0
-                    with open(self.file_path, "rb") as f, mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ) as mm:
+                    with (
+                        open(self.file_path, "rb") as f,
+                        mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ) as mm,
+                    ):
                         while True:
                             idx = mm.find(b"\n", file_pos)
                             if idx == -1:
@@ -582,6 +593,8 @@ class UltimateLargeFileViewer(ctk.CTk):
         self.current_start_line = 0
         self.filter_start = None
         self.filter_end = None
+        self.prefetch_buffer.clear()
+        self.prefetch_range = (0, 0)
 
     def destroy(self):
         self.stop_following()
@@ -666,7 +679,9 @@ class UltimateLargeFileViewer(ctk.CTk):
         self.style.map("Dark.Vertical.TScrollbar", background=[("active", "#4f4f4f")])
 
     def setup_custom_dark_menu(self):
-        self.menu_bar = ctk.CTkFrame(self, height=32, corner_radius=0, fg_color="#1e1e1e", border_width=0)
+        self.menu_bar = ctk.CTkFrame(
+            self, height=32, corner_radius=0, fg_color="#1e1e1e", border_width=0
+        )
         self.menu_bar.pack(fill="x", side="top")
 
         self.menu_sep = ctk.CTkFrame(self, height=1, corner_radius=0, fg_color="#2b2b2b")
@@ -775,8 +790,10 @@ class UltimateLargeFileViewer(ctk.CTk):
 
         self.is_searching = True
         self.btn_search.configure(state="disabled")
-        search_type_lbl = "정규식" if use_regex else "SIMD"
-        self.lbl_search_status.configure(text=f"{search_type_lbl} 가속 검색 중...", text_color="#ffcc00")
+        search_type_lbl = "정규식" if use_regex else "SIMD/병렬"
+        self.lbl_search_status.configure(
+            text=f"{search_type_lbl} 가속 검색 중...", text_color="#ffcc00"
+        )
         self.result_listbox.delete(0, "end")
         self.search_match_lines = []
 
@@ -810,7 +827,9 @@ class UltimateLargeFileViewer(ctk.CTk):
                 try:
                     rust_pattern = keyword.encode(enc, errors="ignore")
                     with self.rust_lock:
-                        matches, line_indices, total_found = self.rust_core.search_keyword(rust_pattern, use_regex)
+                        matches, line_indices, total_found = self.rust_core.search_keyword(
+                            rust_pattern, use_regex
+                        )
 
                     if self.winfo_exists():
                         self.after(
@@ -884,7 +903,8 @@ class UltimateLargeFileViewer(ctk.CTk):
 
         if total_found > 0:
             self.lbl_search_status.configure(
-                text=f"검색 완료: {total_found:,}건" + (" [최대 2,000까지 조회]" if total_found >= 2000 else ""),
+                text=f"검색 완료: {total_found:,}건"
+                + (" [최대 2,000까지 조회]" if total_found >= 2000 else ""),
                 text_color="#27ae60",
             )
             if total_found > 2000:
@@ -957,13 +977,13 @@ class UltimateLargeFileViewer(ctk.CTk):
         if "HEAD" in choice:
             self.filter_start = 0
             self.filter_end = min(count, self.total_lines)
-            # HEAD 모드는 맨 위(Top)부터 시작
             self.current_start_line = self.filter_start
         elif "TAIL" in choice or "FOLLOW" in choice:
             self.filter_start = max(0, self.total_lines - count)
             self.filter_end = self.total_lines
-            # TAIL / FOLLOW 모드는 화면 크기를 고려해 맨 아래(Bottom)가 보이도록 시작 줄 설정
-            self.current_start_line = max(self.filter_start, self.filter_end - self.max_visible_lines)
+            self.current_start_line = max(
+                self.filter_start, self.filter_end - self.max_visible_lines
+            )
 
         self.set_scroll_bar_position(self.current_start_line)
         self.render_view(self.current_start_line)
@@ -1000,10 +1020,14 @@ class UltimateLargeFileViewer(ctk.CTk):
         filename = os.path.basename(file_selected)
         filesize_bytes = self.last_known_file_size
         self.filesize_text = (
-            f"{filesize_bytes / (1024 * 1024):.2f} MB" if filesize_bytes < 1024 * 1024 * 1024 else f"{filesize_bytes / (1024 * 1024 * 1024):.2f} GB"
+            f"{filesize_bytes / (1024 * 1024):.2f} MB"
+            if filesize_bytes < 1024 * 1024 * 1024
+            else f"{filesize_bytes / (1024 * 1024 * 1024):.2f} GB"
         )
 
-        self.lbl_file.configure(text=f"파일 구조 분석 중...: {filename} ({self.filesize_text})", text_color="#ffcc00")
+        self.lbl_file.configure(
+            text=f"파일 구조 분석 중...: {filename} ({self.filesize_text})", text_color="#ffcc00"
+        )
         self.btn_open.configure(state="disabled")
         self.btn_close.pack_forget()
         self.combo_encoding.configure(state="disabled")
@@ -1037,11 +1061,15 @@ class UltimateLargeFileViewer(ctk.CTk):
                         if self.winfo_exists():
                             self.after(
                                 0,
-                                lambda p=pct, n=line_count: self._update_index_progress(p, n, is_rust=True),
+                                lambda p=pct, n=line_count: self._update_index_progress(
+                                    p, n, is_rust=True
+                                ),
                             )
 
                     with self.rust_lock:
-                        self.total_lines = self.rust_core.index_file(self.file_path, rust_progress_callback)
+                        self.total_lines = self.rust_core.index_file(
+                            self.file_path, rust_progress_callback
+                        )
 
                     self.file_handle = open(self.file_path, "rb")
                     self.mmap_obj = mmap.mmap(self.file_handle.fileno(), 0, access=mmap.ACCESS_READ)
@@ -1097,7 +1125,11 @@ class UltimateLargeFileViewer(ctk.CTk):
         if not self.winfo_exists():
             return
         filename = os.path.basename(self.file_path)
-        enc_lbl = f"Auto:{self.detected_encoding.upper()}" if "[자동 감지" in self.encoding_var.get() else self.encoding_var.get()
+        enc_lbl = (
+            f"Auto:{self.detected_encoding.upper()}"
+            if "[자동 감지" in self.encoding_var.get()
+            else self.encoding_var.get()
+        )
         mode_label = " (Rust 가속)" if is_rust else " (파이썬 모드)"
 
         self.lbl_file.configure(
@@ -1119,7 +1151,11 @@ class UltimateLargeFileViewer(ctk.CTk):
 
     def on_indexing_complete(self):
         filename = os.path.basename(self.file_path)
-        enc_lbl = f"Auto:{self.detected_encoding.upper()}" if "[자동 감지" in self.encoding_var.get() else self.encoding_var.get()
+        enc_lbl = (
+            f"Auto:{self.detected_encoding.upper()}"
+            if "[자동 감지" in self.encoding_var.get()
+            else self.encoding_var.get()
+        )
         mode_label = " (Rust 가속 완료)" if self.current_engine_used_rust else " (파이썬 완료)"
 
         self.lbl_file.configure(
@@ -1193,15 +1229,34 @@ class UltimateLargeFileViewer(ctk.CTk):
                 self.render_view(self.current_start_line)
                 self.set_scroll_bar_position(self.current_start_line)
 
+    def _load_prefetch_buffer(self, fetch_start, fetch_count, enc):
+        """[기법 2: Prefetching] 앞뒤 구간 블록을 미리 읽어 인메모리 버퍼에 저장"""
+        mm = self.mmap_obj
+        if mm is None:
+            return
+
+        file_size = mm.size()
+        if self.current_engine_used_rust and self.rust_core is not None:
+            with self.rust_lock:
+                offsets = self.rust_core.get_offsets_range(fetch_start, fetch_count + 1)
+        else:
+            offsets = self.line_offsets[fetch_start : fetch_start + fetch_count + 1]
+
+        self.prefetch_buffer.clear()
+        for i in range(len(offsets) - 1):
+            idx = fetch_start + i
+            start_offset = offsets[i]
+            end_offset = offsets[i + 1] if (i + 1) < len(offsets) else file_size
+            line_bytes = mm[start_offset:end_offset]
+            self.prefetch_buffer[idx] = line_bytes.decode(enc, errors="ignore")
+
+        self.prefetch_range = (fetch_start, fetch_start + len(offsets) - 1)
+
     def render_view(self, start_line, highlight_keyword=None, use_regex=False):
         if not self.file_path or self.total_lines == 0 or self.mmap_obj is None:
             return
 
-        if self.is_indexing:
-            return
-
-        # 1번: 드래그 영역 선택 중일 경우 렌더링 스킵하여 화면 튐 방지
-        if getattr(self, "is_selecting", False):
+        if self.is_indexing or getattr(self, "is_selecting", False):
             return
 
         f_start = self.filter_start if self.filter_start is not None else 0
@@ -1226,26 +1281,18 @@ class UltimateLargeFileViewer(ctk.CTk):
         self.text_area.delete("1.0", "end")
 
         enc = self._get_selected_encoding()
-        mm = self.mmap_obj
 
         try:
-            file_size = mm.size()
+            # [기법 2: Prefetching 전략 실행]
+            p_start, p_end = self.prefetch_range
+            if start_line < p_start or end_line > p_end:
+                fetch_start = max(0, start_line - self.prefetch_margin)
+                fetch_count = (end_line - start_line) + (self.prefetch_margin * 2)
+                self._load_prefetch_buffer(fetch_start, fetch_count, enc)
+
             text_parts = []
-            count = end_line - start_line
-
-            if self.current_engine_used_rust and self.rust_core is not None:
-                with self.rust_lock:
-                    offsets = self.rust_core.get_offsets_range(start_line, count + 1)
-            else:
-                offsets = self.line_offsets[start_line : start_line + count + 1]
-
-            for i in range(count):
-                idx = start_line + i
-                start_offset = offsets[i] if i < len(offsets) else 0
-                end_offset = offsets[i + 1] if (i + 1) < len(offsets) else file_size
-
-                line_data = mm[start_offset:end_offset]
-                decoded_line = line_data.decode(enc, errors="ignore")
+            for idx in range(start_line, end_line):
+                decoded_line = self.prefetch_buffer.get(idx, "")
                 text_parts.append(f"{idx + 1:>7} | {decoded_line}")
 
             full_text = "".join(text_parts)
@@ -1281,7 +1328,9 @@ class UltimateLargeFileViewer(ctk.CTk):
 
     def popup_split_dialog(self):
         if not self.file_path or self.is_indexing or self.is_splitting:
-            messagebox.showwarning("경고", "먼저 분석 완료된 파일이 존재해야 하며 진행 중인 분할 작업이 없어야 합니다.")
+            messagebox.showwarning(
+                "경고", "먼저 분석 완료된 파일이 존재해야 하며 진행 중인 분할 작업이 없어야 합니다."
+            )
             return
         dialog = ctk.CTkToplevel(self)
         dialog.title("용량별 파일 분할")
@@ -1298,11 +1347,15 @@ class UltimateLargeFileViewer(ctk.CTk):
         ).pack(pady=(20, 5))
         frame_input = ctk.CTkFrame(dialog, fg_color="transparent")
         frame_input.pack(pady=10)
-        ctk.CTkLabel(frame_input, text="분할할 단위 용량 :", font=("Malgun Gothic", 12)).pack(side="left", padx=5)
+        ctk.CTkLabel(frame_input, text="분할할 단위 용량 :", font=("Malgun Gothic", 12)).pack(
+            side="left", padx=5
+        )
         entry_size = ctk.CTkEntry(frame_input, width=90, justify="center")
         entry_size.insert(0, "100")
         entry_size.pack(side="left", padx=5)
-        ctk.CTkLabel(frame_input, text="MB", font=("Malgun Gothic", 12, "bold")).pack(side="left", padx=5)
+        ctk.CTkLabel(frame_input, text="MB", font=("Malgun Gothic", 12, "bold")).pack(
+            side="left", padx=5
+        )
 
         def run_split():
             try:
@@ -1310,7 +1363,9 @@ class UltimateLargeFileViewer(ctk.CTk):
                 if size_mb <= 0:
                     raise ValueError
             except ValueError:
-                messagebox.showerror("입력 오류", "올바른 분할 용량(MB)을 입력하세요.", parent=dialog)
+                messagebox.showerror(
+                    "입력 오류", "올바른 분할 용량(MB)을 입력하세요.", parent=dialog
+                )
                 return
             dialog.destroy()
 
@@ -1320,9 +1375,13 @@ class UltimateLargeFileViewer(ctk.CTk):
 
             self.is_splitting = True
             self.lbl_file.configure(text="파일 분할 내보내기 진행 중...", text_color="#ffcc00")
-            self.popup_progress_window("파일 분할 작업 진행률", "파일 분할 중입니다. 잠시만 기다려주세요...")
+            self.popup_progress_window(
+                "파일 분할 작업 진행률", "파일 분할 중입니다. 잠시만 기다려주세요..."
+            )
 
-            t = threading.Thread(target=self.split_file_worker, args=(size_mb, save_dir), daemon=True)
+            t = threading.Thread(
+                target=self.split_file_worker, args=(size_mb, save_dir), daemon=True
+            )
             t.start()
 
         ctk.CTkButton(
@@ -1349,7 +1408,9 @@ class UltimateLargeFileViewer(ctk.CTk):
         self.prog_bar.set(0.0)
         self.prog_bar.pack(pady=10, padx=20)
 
-        self.prog_lbl_pct = ctk.CTkLabel(self.prog_win, text="준비 중... (0%)", font=("Malgun Gothic", 11, "bold"))
+        self.prog_lbl_pct = ctk.CTkLabel(
+            self.prog_win, text="준비 중... (0%)", font=("Malgun Gothic", 11, "bold")
+        )
         self.prog_lbl_pct.pack(pady=(0, 10))
 
     def _update_progress_ui(self, float_val, status_text):
@@ -1370,7 +1431,9 @@ class UltimateLargeFileViewer(ctk.CTk):
                 self.after(0, self._close_progress_ui)
                 self.after(
                     0,
-                    lambda: messagebox.showwarning("경고", "입력한 분할 용량이 원본 파일의 전체 크기보다 크거나 같습니다."),
+                    lambda: messagebox.showwarning(
+                        "경고", "입력한 분할 용량이 원본 파일의 전체 크기보다 크거나 같습니다."
+                    ),
                 )
                 self.after(0, lambda: self._on_split_complete(False))
             return
@@ -1403,7 +1466,9 @@ class UltimateLargeFileViewer(ctk.CTk):
                     while end_line_idx < total_offsets - 1:
                         if self.current_engine_used_rust and self.rust_core is not None:
                             with self.rust_lock:
-                                next_offset = max(start_offset, self.rust_core.get_offset(end_line_idx + 1) or 0)
+                                next_offset = max(
+                                    start_offset, self.rust_core.get_offset(end_line_idx + 1) or 0
+                                )
                         else:
                             next_offset = self.line_offsets[end_line_idx + 1]
 
@@ -1418,10 +1483,16 @@ class UltimateLargeFileViewer(ctk.CTk):
                         with self.rust_lock:
                             actual_end_offset = max(
                                 start_offset,
-                                (self.rust_core.get_offset(end_line_idx) or file_total_size) if end_line_idx < total_offsets else file_total_size,
+                                (self.rust_core.get_offset(end_line_idx) or file_total_size)
+                                if end_line_idx < total_offsets
+                                else file_total_size,
                             )
                     else:
-                        actual_end_offset = self.line_offsets[end_line_idx] if end_line_idx < total_offsets else file_total_size
+                        actual_end_offset = (
+                            self.line_offsets[end_line_idx]
+                            if end_line_idx < total_offsets
+                            else file_total_size
+                        )
 
                     bytes_to_write = actual_end_offset - start_offset
                     if bytes_to_write <= 0:
@@ -1445,9 +1516,13 @@ class UltimateLargeFileViewer(ctk.CTk):
                     current_time = time.time()
                     if current_time - last_ui_update_time >= 0.5:
                         pct_float = actual_end_offset / file_total_size
-                        pct_text = f"분할 내보내기 중... {int(pct_float * 100)}% (Part {part_num - 1})"
+                        pct_text = (
+                            f"분할 내보내기 중... {int(pct_float * 100)}% (Part {part_num - 1})"
+                        )
                         if self.winfo_exists():
-                            self.after(0, lambda f=pct_float, t=pct_text: self._update_progress_ui(f, t))
+                            self.after(
+                                0, lambda f=pct_float, t=pct_text: self._update_progress_ui(f, t)
+                            )
                         last_ui_update_time = current_time
                         time.sleep(0.001)
 
@@ -1465,7 +1540,9 @@ class UltimateLargeFileViewer(ctk.CTk):
             if self.winfo_exists():
                 self.after(
                     0,
-                    lambda: messagebox.showerror("분할 실패", f"파일을 분할하는 중 시스템 오류가 발생했습니다:\n{err_msg}"),
+                    lambda: messagebox.showerror(
+                        "분할 실패", f"파일을 분할하는 중 시스템 오류가 발생했습니다:\n{err_msg}"
+                    ),
                 )
         finally:
             if self.winfo_exists():
@@ -1477,7 +1554,11 @@ class UltimateLargeFileViewer(ctk.CTk):
         if not self.file_path:
             return
         filename = os.path.basename(self.file_path)
-        enc_lbl = f"Auto:{self.detected_encoding.upper()}" if "[자동 감지" in self.encoding_var.get() else self.encoding_var.get()
+        enc_lbl = (
+            f"Auto:{self.detected_encoding.upper()}"
+            if "[자동 감지" in self.encoding_var.get()
+            else self.encoding_var.get()
+        )
         if success:
             mode_label = " (Rust 가속 완료)" if self.current_engine_used_rust else " (파이썬 완료)"
             self.lbl_file.configure(
@@ -1535,9 +1616,13 @@ class UltimateLargeFileViewer(ctk.CTk):
             dialog.destroy()
             self.is_merging = True
             self.lbl_file.configure(text="여러 텍스트 파일 병합 진행 중...", text_color="#ffcc00")
-            self.popup_progress_window("파일 병합 작업 진행률", "파일을 순서대로 통합 병합 중입니다...")
+            self.popup_progress_window(
+                "파일 병합 작업 진행률", "파일을 순서대로 통합 병합 중입니다..."
+            )
 
-            t = threading.Thread(target=self.merge_files_worker, args=(files_selected, save_file_path), daemon=True)
+            t = threading.Thread(
+                target=self.merge_files_worker, args=(files_selected, save_file_path), daemon=True
+            )
             t.start()
 
         ctk.CTkButton(
@@ -1570,7 +1655,9 @@ class UltimateLargeFileViewer(ctk.CTk):
                         pct_float = (idx + 1) / total_files
                         pct_text = f"전체 {total_files}개 중 {idx + 1}개 파일 병합 완료 ({int(pct_float * 100)}%)"
                         if self.winfo_exists():
-                            self.after(0, lambda f=pct_float, t=pct_text: self._update_progress_ui(f, t))
+                            self.after(
+                                0, lambda f=pct_float, t=pct_text: self._update_progress_ui(f, t)
+                            )
                         last_ui_update_time = current_time
                         time.sleep(0.001)
 
@@ -1588,7 +1675,9 @@ class UltimateLargeFileViewer(ctk.CTk):
             if self.winfo_exists():
                 self.after(
                     0,
-                    lambda: messagebox.showerror("병합 실패", f"파일을 합치는 도중 시스템 오류가 발생했습니다:\n{err_msg}"),
+                    lambda: messagebox.showerror(
+                        "병합 실패", f"파일을 합치는 도중 시스템 오류가 발생했습니다:\n{err_msg}"
+                    ),
                 )
         finally:
             if self.winfo_exists():
@@ -1604,7 +1693,11 @@ class UltimateLargeFileViewer(ctk.CTk):
             )
             return
         filename = os.path.basename(self.file_path)
-        enc_lbl = f"Auto:{self.detected_encoding.upper()}" if "[자동 감지" in self.encoding_var.get() else self.encoding_var.get()
+        enc_lbl = (
+            f"Auto:{self.detected_encoding.upper()}"
+            if "[자동 감지" in self.encoding_var.get()
+            else self.encoding_var.get()
+        )
         if success:
             mode_label = " (Rust 가속 완료)" if self.current_engine_used_rust else " (파이썬 완료)"
             self.lbl_file.configure(
@@ -1656,7 +1749,9 @@ class UltimateLargeFileViewer(ctk.CTk):
         elif action == "scroll":
             current_first = self.v_scrollbar.get()[0]
             start_line = f_start + int(current_first * total_filtered_lines)
-            start_line += int(fraction) * self.max_visible_lines if unit == "pages" else int(fraction)
+            start_line += (
+                int(fraction) * self.max_visible_lines if unit == "pages" else int(fraction)
+            )
 
         max_scroll_limit = max(f_start, f_end - self.max_visible_lines)
         start_line = max(f_start, min(start_line, max_scroll_limit))
