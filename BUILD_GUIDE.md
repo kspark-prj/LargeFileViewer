@@ -223,7 +223,7 @@ python3 LargeFileViewer.py
 
 ```bash
 # 단일 바이너리 빌드
-pyinstaller -w -F --icon=main.ico  --collect-all large_file_core LargeFileViewer.py
+pyinstaller -w -F --icon=main.ico  --exclude-module PIL --exclude-module Pillow --collect-all large_file_core LargeFileViewer.py
 ```
 
 빌드 완료 후 **`dist/LargeFileViewer`** 경로에 실행 파일이 생성됩니다.
