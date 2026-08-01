@@ -20,7 +20,7 @@
                     │    maturin으로 코어 컴파일               │
                     └─────────────────────────────────────────┘
                                           ↓
-              ⑤ 프로그램 실행 (python LargeFileViewer.py)
+              ⑤ 프로그램 실행 (python Hawkeye.py)
                                           ↓
                     ┌─────────────────────────────────────────┐
                     │  ⑥ (선택) 실행 파일 패키징 (.exe / ELF) │
@@ -127,7 +127,7 @@ pip install ./large_file_core
 ### ⑤ 프로그램 실행
 
 ```powershell
-python LargeFileViewer.py
+python Hawkeye.py
 ```
 
 ### ⑥ (선택) 실행 파일(.exe) 패키징
@@ -213,7 +213,7 @@ pip install ./large_file_core
 ### ⑤ 프로그램 실행
 
 ```bash
-python3 LargeFileViewer.py
+python3 Hawkeye.py
 ```
 
 > **ℹ️ 참고:** GUI 환경(X11 / Wayland)이 활성화된 데스크톱 환경에서만 화면이 정상 로드됩니다.
@@ -223,7 +223,7 @@ python3 LargeFileViewer.py
 
 ```bash
 # 단일 바이너리 빌드
-pyinstaller -w -F --icon=main.ico  --exclude-module PIL --exclude-module Pillow --collect-all large_file_core LargeFileViewer.py
+pyinstaller -w -F --icon=main.ico  --exclude-module PIL --exclude-module Pillow --collect-all large_file_core Hawkeye.py
 ```
 
 빌드 완료 후 **`dist/LargeFileViewer`** 경로에 실행 파일이 생성됩니다.

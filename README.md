@@ -34,7 +34,7 @@ CustomTkinter 기반의 **대용량 텍스트/로그 파일 고속 뷰어 및 �
 
 ```text
 📂 largeFileViewer/
-├── 📄 LargeFileViewer.py     # 메인 애플리케이션 (뷰어/실시간 추적/검색/분할/병합)
+├── 📄 Hawkeye.py     # 메인 애플리케이션 (뷰어/실시간 추적/검색/분할/병합)
 ├── 📄 LargeFileViewer.spec   # PyInstaller 빌드 스펙 파일
 ├── 📄 requirements.txt       # Python 의존성 패키지 목록
 ├── 📂 large_file_core/       # Rust 가속 코어 모듈
@@ -73,7 +73,7 @@ pip install -r requirements.txt
 pip install ./large_file_core
 
 # 5. 프로그램 실행
-python LargeFileViewer.py
+python Hawkeye.py
 
 ```
 
