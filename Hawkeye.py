@@ -5,7 +5,6 @@ import re
 import threading
 import time
 import tkinter as tk
-import traceback
 from tkinter import filedialog, messagebox, ttk
 
 import customtkinter as ctk
@@ -35,12 +34,47 @@ class CTkCustomMenu(ctk.CTkFrame):
         self.master_window = master_window
         self.items = items
         self.buttons = []
+        self.separators = []
+        self.sub_labels = []
+        self.opt_menus = []
         self._bind_id = None
 
         for item in self.items:
             if item == "separator":
                 sep = ctk.CTkFrame(self, height=1, fg_color="#3a3a3a")
                 sep.pack(fill="x", padx=5, pady=4)
+                self.separators.append(sep)
+            elif item.get("type") == "submenu":
+                # 서브메뉴가 포함된 항목 처리 (테마, 폰트크기 등)
+                lbl = ctk.CTkLabel(
+                    self,
+                    text=item["label"],
+                    font=("Malgun Gothic", 11, "bold"),
+                    anchor="w",
+                    text_color="#888888",
+                    height=20,
+                )
+                lbl.pack(fill="x", padx=8, pady=(4, 2))
+                self.sub_labels.append(lbl)
+
+                opt_var = item.get("variable")
+                opt_values = item.get("values", [])
+                opt_cmd = item.get("command")
+
+                opt_menu = ctk.CTkOptionMenu(
+                    self,
+                    values=opt_values,
+                    variable=opt_var,
+                    command=lambda val, cmd=opt_cmd: self._on_option_click(val, cmd),
+                    font=("Malgun Gothic", 11),
+                    height=26,
+                    fg_color="#3a3a3a",
+                    button_color="#4a4a4a",
+                    button_hover_color="#5a5a5a",
+                    dropdown_fg_color="#2b2b2b",
+                )
+                opt_menu.pack(fill="x", padx=6, pady=(0, 4))
+                self.opt_menus.append(opt_menu)
             else:
                 target_cmd = item.get("command")
                 btn = ctk.CTkButton(
@@ -57,6 +91,45 @@ class CTkCustomMenu(ctk.CTkFrame):
                 )
                 btn.pack(fill="x", padx=4, pady=2)
                 self.buttons.append(btn)
+
+    def apply_theme_style(self, mode):
+        """테마 전환에 따른 커스텀 메뉴 스타일 적용"""
+        if mode == "Light":
+            self.configure(fg_color="#e0e0e0", border_color="#cccccc")
+            for btn in self.buttons:
+                btn.configure(text_color="#000000", hover_color="#c8c8c8")
+            for sep in self.separators:
+                sep.configure(fg_color="#cccccc")
+            for lbl in self.sub_labels:
+                lbl.configure(text_color="#555555")
+            for opt_menu in self.opt_menus:
+                opt_menu.configure(
+                    fg_color="#ffffff",
+                    button_color="#e0e0e0",
+                    button_hover_color="#d0d0d0",
+                    text_color="#000000",
+                    dropdown_fg_color="#ffffff",
+                    dropdown_text_color="#000000",
+                    dropdown_hover_color="#e0e0e0",
+                )
+        else:
+            self.configure(fg_color="#2b2b2b", border_color="#3a3a3a")
+            for btn in self.buttons:
+                btn.configure(text_color="#ffffff", hover_color="#1d5287")
+            for sep in self.separators:
+                sep.configure(fg_color="#3a3a3a")
+            for lbl in self.sub_labels:
+                lbl.configure(text_color="#888888")
+            for opt_menu in self.opt_menus:
+                opt_menu.configure(
+                    fg_color="#3a3a3a",
+                    button_color="#4a4a4a",
+                    button_hover_color="#5a5a5a",
+                    text_color="#ffffff",
+                    dropdown_fg_color="#2b2b2b",
+                    dropdown_text_color="#ffffff",
+                    dropdown_hover_color="#3a3a3a",
+                )
 
     def show(self, x, y):
         self.place(x=x, y=y)
@@ -84,6 +157,14 @@ class CTkCustomMenu(ctk.CTkFrame):
                 print(f"Menu action error: {e}")
         self.hide()
 
+    def _on_option_click(self, val, command):
+        if command:
+            try:
+                command(val)
+            except Exception as e:
+                print(f"Option action error: {e}")
+        self.hide()
+
     def _on_outside_click(self, event):
         if not self.winfo_exists():
             return
@@ -96,7 +177,11 @@ class CTkCustomMenu(ctk.CTkFrame):
                 return
         except Exception:
             pass
-        if widget in [self.master_window.menu_file_btn, self.master_window.menu_tools_btn]:
+        if widget in [
+            self.master_window.menu_file_btn,
+            self.master_window.menu_tools_btn,
+            self.master_window.menu_settings_btn,
+        ]:
             return
         self.hide()
 
@@ -120,6 +205,15 @@ class UltimateLargeFileViewer(ctk.CTk):
         self.prefetch_buffer = {}
         self.prefetch_range = (0, 0)
         self.prefetch_margin = 100  # 위아래로 100줄씩 프리페칭
+
+        self.current_font_size = 14  # 기본 폰트 사이즈 14로 변경
+
+        # 테마별 강조 및 상태 색상 상수 정의
+        self.COLOR_WARNING = {"Dark": "#ffcc00", "Light": "#d35400"}
+        self.COLOR_INFO = {"Dark": "#58a6ff", "Light": "#1f618d"}
+        self.COLOR_SUCCESS = {"Dark": "#27ae60", "Light": "#27ae60"}
+        self.COLOR_ERROR = {"Dark": "#ff4444", "Light": "#c0392b"}
+        self.COLOR_MUTED = {"Dark": "#aaaaaa", "Light": "#666666"}
 
         self.rust_lock = threading.Lock()
         self.rust_core = None
@@ -148,6 +242,9 @@ class UltimateLargeFileViewer(ctk.CTk):
 
         self.search_panel_visible = False
         self.resize_timer = None
+
+        self.theme_var = ctk.StringVar(value="Dark")
+        self.font_size_var = ctk.StringVar(value="14pt")
 
         self.setup_dark_scrollbar_style()
         self.setup_custom_dark_menu()
@@ -182,18 +279,16 @@ class UltimateLargeFileViewer(ctk.CTk):
             self.top_frame,
             values=["[자동 감지 (Auto)]", "UTF-8", "CP949 / EUC-KR", "UTF-16", "ASCII"],
             variable=self.encoding_var,
-            width=150,
+            width=140,
             font=("Malgun Gothic", 11),
-            fg_color="#2b2b2b",
-            button_color="#3a3a3a",
-            button_hover_color="#4f4f4f",
+            fg_color="#3a3a3a",
+            button_color="#4a4a4a",
+            button_hover_color="#5a5a5a",
             dropdown_fg_color="#2b2b2b",
-            dropdown_hover_color="#1d5287",
-            text_color="#d0d0d0",
         )
-        self.combo_encoding.pack(side="left", padx=(0, 10), pady=10)
+        self.combo_encoding.pack(side="left", padx=(0, 5), pady=10)
 
-        # --- 라인 이동 및 하이라이트 컨트롤 프레임 ---
+        # --- 라인 이동 컨트롤 프레임 ---
         self.goto_frame = ctk.CTkFrame(self.top_frame, fg_color="transparent")
         self.goto_frame.pack(side="right", padx=(5, 10), pady=10)
 
@@ -219,9 +314,9 @@ class UltimateLargeFileViewer(ctk.CTk):
 
         self.lbl_file = ctk.CTkLabel(
             self.top_frame,
-            text="선택된 파일이 없습니다. 인코딩을 지정하고 [파일 열기] 버튼을 누르세요.",
+            text="선택된 파일이 없습니다. [파일 열기] 버튼을 누르세요.",
             font=("Malgun Gothic", 12),
-            text_color="#aaaaaa",
+            text_color=self.COLOR_MUTED["Dark"],
             anchor="w",
         )
         self.lbl_file.pack(side="left", fill="x", expand=True, padx=5, pady=10)
@@ -286,7 +381,7 @@ class UltimateLargeFileViewer(ctk.CTk):
 
         self.text_area = ctk.CTkTextbox(
             self.editor_frame,
-            font=("Consolas", 13),
+            font=("Consolas", self.current_font_size),
             wrap="none",
             corner_radius=8,
             fg_color="#2b2b2b",
@@ -406,14 +501,14 @@ class UltimateLargeFileViewer(ctk.CTk):
             self.search_panel_frame,
             text="검색 전입니다.",
             font=("Malgun Gothic", 11),
-            text_color="#aaaaaa",
+            text_color=self.COLOR_MUTED["Dark"],
         )
         self.lbl_search_status.pack(fill="x", padx=15, pady=(2, 0))
 
         self.lbl_limit_info = ctk.CTkLabel(
             self.search_panel_frame,
             text="",
-            text_color="#ffcc00",
+            text_color=self.COLOR_WARNING["Dark"],
             font=("Malgun Gothic", 10),
             anchor="w",
         )
@@ -428,7 +523,7 @@ class UltimateLargeFileViewer(ctk.CTk):
             fg="#a9b7c6",
             selectbackground="#1d5287",
             selectforeground="#ffffff",
-            font=("Consolas", 12, "bold"),
+            font=("Consolas", max(10, self.current_font_size - 1), "bold"),
             bd=0,
             highlightthickness=1,
             highlightcolor="#2b73b8",
@@ -452,6 +547,144 @@ class UltimateLargeFileViewer(ctk.CTk):
         self.bind("<Control-f>", lambda event: self.toggle_search_panel())
         self.bind("<Control-F>", lambda event: self.toggle_search_panel())
 
+    def change_theme_mode(self, mode):
+        """다크 / 라이트 테마 모드 변경 처리 및 가독성 개선"""
+        ctk.set_appearance_mode(mode)
+
+        if mode == "Light":
+            # 상단 메뉴바 영역 라이트 테마 색상 적용
+            self.menu_bar.configure(fg_color="#e0e0e0")
+            self.menu_sep.configure(fg_color="#cccccc")
+            for btn in (self.menu_file_btn, self.menu_tools_btn, self.menu_settings_btn):
+                btn.configure(text_color="#000000", hover_color="#c8c8c8")
+
+            # 커스텀 드롭다운 메뉴 스타일 변경
+            self.file_dropdown_custom.apply_theme_style("Light")
+            self.tools_dropdown_custom.apply_theme_style("Light")
+            self.settings_dropdown_custom.apply_theme_style("Light")
+
+            # 라이트 테마 시 인코딩 콤보박스 하얗게 변경하여 가독성 확보
+            self.combo_encoding.configure(
+                fg_color="#ffffff",
+                button_color="#e0e0e0",
+                button_hover_color="#d0d0d0",
+                text_color="#000000",
+                dropdown_fg_color="#ffffff",
+                dropdown_text_color="#000000",
+                dropdown_hover_color="#e0e0e0",
+            )
+
+            # 라이트 모드 스타일 적용
+            self.text_area.configure(fg_color="#f8f9fa", text_color="#1e1e1e")
+            self.result_listbox.configure(
+                bg="#ffffff",
+                fg="#1e1e1e",
+                selectbackground="#2b73b8",
+                selectforeground="#ffffff",
+                highlightbackground="#cccccc",
+            )
+            self.style.configure(
+                "Dark.Vertical.TScrollbar",
+                background="#c0c0c0",
+                troughcolor="#f0f0f0",
+                bordercolor="#ffffff",
+                arrowcolor="#333333",
+                lightcolor="#c0c0c0",
+                darkcolor="#c0c0c0",
+            )
+            self.style.map("Dark.Vertical.TScrollbar", background=[("active", "#a0a0a0")])
+
+            # 헤더 파일 라벨 가독성 업데이트
+            if not self.file_path:
+                self.lbl_file.configure(text_color=self.COLOR_MUTED["Light"])
+            else:
+                filename = os.path.basename(self.file_path)
+                enc_lbl = (
+                    f"Auto:{self.detected_encoding.upper()}"
+                    if "[자동 감지" in self.encoding_var.get()
+                    else self.encoding_var.get()
+                )
+                mode_label = "Rust 가속" if self.current_engine_used_rust else "Python"
+                display_text = f"📄 {filename} ({self.filesize_text})  |  총 {self.total_lines:,} 줄  |  엔진: {mode_label}  |  인코딩: {enc_lbl}"
+                self.lbl_file.configure(text=display_text, text_color=self.COLOR_INFO["Light"])
+
+            self.lbl_search_status.configure(text_color=self.COLOR_MUTED["Light"])
+            self.lbl_limit_info.configure(text_color=self.COLOR_WARNING["Light"])
+
+        else:
+            # 상단 메뉴바 영역 다크 테마 색상 적용
+            self.menu_bar.configure(fg_color="#1e1e1e")
+            self.menu_sep.configure(fg_color="#2b2b2b")
+            for btn in (self.menu_file_btn, self.menu_tools_btn, self.menu_settings_btn):
+                btn.configure(text_color="#ffffff", hover_color="#2d2d2d")
+
+            # 커스텀 드롭다운 메뉴 스타일 변경
+            self.file_dropdown_custom.apply_theme_style("Dark")
+            self.tools_dropdown_custom.apply_theme_style("Dark")
+            self.settings_dropdown_custom.apply_theme_style("Dark")
+
+            # 다크 테마 인코딩 콤보박스 색상 복구
+            self.combo_encoding.configure(
+                fg_color="#3a3a3a",
+                button_color="#4a4a4a",
+                button_hover_color="#5a5a5a",
+                text_color="#ffffff",
+                dropdown_fg_color="#2b2b2b",
+                dropdown_text_color="#ffffff",
+                dropdown_hover_color="#3a3a3a",
+            )
+
+            # 다크 모드 스타일 적용
+            self.text_area.configure(fg_color="#2b2b2b", text_color="#a9b7c6")
+            self.result_listbox.configure(
+                bg="#1e1e1e",
+                fg="#a9b7c6",
+                selectbackground="#1d5287",
+                selectforeground="#ffffff",
+                highlightbackground="#333333",
+            )
+            self.style.configure(
+                "Dark.Vertical.TScrollbar",
+                background="#3a3a3a",
+                troughcolor="#1e1e1e",
+                bordercolor="#2b2b2b",
+                arrowcolor="#aaaaaa",
+                lightcolor="#3a3a3a",
+                darkcolor="#3a3a3a",
+            )
+            self.style.map("Dark.Vertical.TScrollbar", background=[("active", "#4f4f4f")])
+
+            # 헤더 파일 라벨 가독성 업데이트
+            if not self.file_path:
+                self.lbl_file.configure(text_color=self.COLOR_MUTED["Dark"])
+            else:
+                filename = os.path.basename(self.file_path)
+                enc_lbl = (
+                    f"Auto:{self.detected_encoding.upper()}"
+                    if "[자동 감지" in self.encoding_var.get()
+                    else self.encoding_var.get()
+                )
+                mode_label = "Rust 가속" if self.current_engine_used_rust else "Python"
+                display_text = f"📄 {filename} ({self.filesize_text})  |  총 {self.total_lines:,} 줄  |  엔진: {mode_label}  |  인코딩: {enc_lbl}"
+                self.lbl_file.configure(text=display_text, text_color=self.COLOR_INFO["Dark"])
+
+            self.lbl_search_status.configure(text_color=self.COLOR_MUTED["Dark"])
+            self.lbl_limit_info.configure(text_color=self.COLOR_WARNING["Dark"])
+
+        if self.file_path and self.total_lines > 0:
+            self.render_view(self.current_start_line)
+
+    def change_font_size(self, choice):
+        """폰트 크기 동적 변경 처리"""
+        try:
+            size_int = int(choice.replace("pt", ""))
+            self.current_font_size = size_int
+            self.text_area.configure(font=("Consolas", self.current_font_size))
+            self.result_listbox.configure(font=("Consolas", max(10, size_int - 1), "bold"))
+            self._deferred_update_visible_count()
+        except ValueError:
+            pass
+
     def goto_line_action(self):
         """라인 번호를 입력 받아 바로가기 및 하이라이트 적용"""
         if not self.file_path or self.total_lines == 0:
@@ -474,17 +707,14 @@ class UltimateLargeFileViewer(ctk.CTk):
             messagebox.showerror("입력 오류", "올바른 숫자를 입력하세요.")
             return
 
-        # 1기반 인덱스를 0기반 인덱스로 변환
         zero_based_line = target_line - 1
 
-        # 필터 모드가 설정된 경우 전체보기(FULL)로 자동 전환
         if self.filter_start != 0 or self.filter_end != self.total_lines:
             self.view_mode_var.set("전체보기 (FULL)")
             self.toggle_tab_options(show=False)
             self.filter_start = 0
             self.filter_end = self.total_lines
 
-        # 이동할 라인이 화면 중간쯤에 오도록 시작 라인 계산
         start_line = max(0, zero_based_line - (self.max_visible_lines // 2))
 
         self.set_scroll_bar_position(start_line)
@@ -774,6 +1004,18 @@ class UltimateLargeFileViewer(ctk.CTk):
         )
         self.menu_tools_btn.pack(side="left", padx=2, pady=3)
 
+        self.menu_settings_btn = ctk.CTkButton(
+            self.menu_bar,
+            text="설정(S)",
+            font=("Malgun Gothic", 11),
+            width=55,
+            height=26,
+            fg_color="transparent",
+            hover_color="#2d2d2d",
+            text_color="#ffffff",
+        )
+        self.menu_settings_btn.pack(side="left", padx=2, pady=3)
+
         file_items = [
             {"label": "파일 열기...", "command": self.start_open_file_thread},
             {"label": "파일 닫기", "command": self.close_file},
@@ -791,11 +1033,31 @@ class UltimateLargeFileViewer(ctk.CTk):
             {"label": "여러 텍스트 파일 하나로 합치기...", "command": self.popup_merge_dialog},
         ]
 
+        settings_items = [
+            {
+                "type": "submenu",
+                "label": "테마 선택",
+                "variable": self.theme_var,
+                "values": ["Dark", "Light"],
+                "command": self.change_theme_mode,
+            },
+            "separator",
+            {
+                "type": "submenu",
+                "label": "폰트 크기 선택",
+                "variable": self.font_size_var,
+                "values": ["10pt", "11pt", "12pt", "13pt", "14pt", "16pt", "18pt", "20pt"],
+                "command": self.change_font_size,
+            },
+        ]
+
         self.file_dropdown_custom = CTkCustomMenu(self, self, file_items)
         self.tools_dropdown_custom = CTkCustomMenu(self, self, tools_items)
+        self.settings_dropdown_custom = CTkCustomMenu(self, self, settings_items)
 
         self.menu_file_btn.bind("<Button-1>", lambda event: self._toggle_file_menu())
         self.menu_tools_btn.bind("<Button-1>", lambda event: self._toggle_tools_menu())
+        self.menu_settings_btn.bind("<Button-1>", lambda event: self._toggle_settings_menu())
 
     def _toggle_file_menu(self):
         if self.file_dropdown_custom.winfo_manager():
@@ -803,6 +1065,8 @@ class UltimateLargeFileViewer(ctk.CTk):
         else:
             if self.tools_dropdown_custom.winfo_manager():
                 self.tools_dropdown_custom.hide()
+            if self.settings_dropdown_custom.winfo_manager():
+                self.settings_dropdown_custom.hide()
             x = self.menu_file_btn.winfo_x()
             y = self.menu_file_btn.winfo_y() + self.menu_file_btn.winfo_height() + 2
             self.file_dropdown_custom.show(x, y)
@@ -813,9 +1077,23 @@ class UltimateLargeFileViewer(ctk.CTk):
         else:
             if self.file_dropdown_custom.winfo_manager():
                 self.file_dropdown_custom.hide()
+            if self.settings_dropdown_custom.winfo_manager():
+                self.settings_dropdown_custom.hide()
             x = self.menu_tools_btn.winfo_x()
             y = self.menu_tools_btn.winfo_y() + self.menu_tools_btn.winfo_height() + 2
             self.tools_dropdown_custom.show(x, y)
+
+    def _toggle_settings_menu(self):
+        if self.settings_dropdown_custom.winfo_manager():
+            self.settings_dropdown_custom.hide()
+        else:
+            if self.file_dropdown_custom.winfo_manager():
+                self.file_dropdown_custom.hide()
+            if self.tools_dropdown_custom.winfo_manager():
+                self.tools_dropdown_custom.hide()
+            x = self.menu_settings_btn.winfo_x()
+            y = self.menu_settings_btn.winfo_y() + self.menu_settings_btn.winfo_height() + 2
+            self.settings_dropdown_custom.show(x, y)
 
     def toggle_search_panel(self):
         if not self.file_path:
@@ -824,6 +1102,7 @@ class UltimateLargeFileViewer(ctk.CTk):
         self._force_close_search_panel()
 
     def _force_close_search_panel(self):
+        mode = self.theme_var.get()
         if self.search_panel_visible:
             self.search_panel_frame.pack_forget()
             self.main_container.pack_configure(padx=0)
@@ -834,7 +1113,9 @@ class UltimateLargeFileViewer(ctk.CTk):
 
             self.entry_search.delete(0, "end")
             self.result_listbox.delete(0, "end")
-            self.lbl_search_status.configure(text="검색 전입니다.", text_color="#aaaaaa")
+            self.lbl_search_status.configure(
+                text="검색 전입니다.", text_color=self.COLOR_MUTED[mode]
+            )
             self.search_match_lines = []
 
             self.search_panel_visible = True
@@ -850,12 +1131,13 @@ class UltimateLargeFileViewer(ctk.CTk):
             return
 
         use_regex = self.use_regex_var.get()
+        mode = self.theme_var.get()
 
         self.is_searching = True
         self.btn_search.configure(state="disabled")
         search_type_lbl = "정규식" if use_regex else "SIMD/병렬"
         self.lbl_search_status.configure(
-            text=f"{search_type_lbl} 가속 검색 중...", text_color="#ffcc00"
+            text=f"{search_type_lbl} 가속 검색 중...", text_color=self.COLOR_WARNING[mode]
         )
         self.result_listbox.delete(0, "end")
         self.search_match_lines = []
@@ -902,7 +1184,6 @@ class UltimateLargeFileViewer(ctk.CTk):
                     return
                 except Exception as rust_err:
                     print(f"[디버그] Rust 검색 예외 발생, 파이썬 모드로 전환: {rust_err}")
-                    traceback.print_exc()
 
             k_bytes = keyword.encode(enc, errors="ignore")
             matched_offsets = []
@@ -958,6 +1239,7 @@ class UltimateLargeFileViewer(ctk.CTk):
             self.after(0, lambda: self.on_complete_search_ui(matches, line_indices, total_found))
 
     def on_complete_search_ui(self, matches, line_indices, total_found):
+        mode = self.theme_var.get()
         self.search_match_lines = line_indices
         self.result_listbox.delete(0, "end")
 
@@ -968,7 +1250,7 @@ class UltimateLargeFileViewer(ctk.CTk):
             self.lbl_search_status.configure(
                 text=f"검색 완료: {total_found:,}건"
                 + (" [최대 2,000까지 조회]" if total_found >= 2000 else ""),
-                text_color="#27ae60",
+                text_color=self.COLOR_SUCCESS[mode],
             )
             if total_found > 2000:
                 self.lbl_limit_info.configure(text="※ 화면은 2,000개까지만 표시됩니다.")
@@ -978,7 +1260,7 @@ class UltimateLargeFileViewer(ctk.CTk):
             if self.result_listbox.size() > 0:
                 self.result_listbox.select_set(0)
         else:
-            self.lbl_search_status.configure(text="결과 없음", text_color="#ff4444")
+            self.lbl_search_status.configure(text="결과 없음", text_color=self.COLOR_ERROR[mode])
             self.lbl_limit_info.configure(text="")
 
         self.btn_search.configure(state="normal")
@@ -1075,9 +1357,12 @@ class UltimateLargeFileViewer(ctk.CTk):
         self._close_mmap()
         self.file_path = file_selected
         self.last_known_file_size = os.path.getsize(file_selected)
+        mode = self.theme_var.get()
 
         if "[자동 감지" in self.encoding_var.get():
-            self.lbl_file.configure(text="인코딩 속성 분석 중...", text_color="#ffcc00")
+            self.lbl_file.configure(
+                text="인코딩 속성 분석 중...", text_color=self.COLOR_WARNING[mode]
+            )
             self.detected_encoding = self._auto_detect_encoding(file_selected)
 
         filename = os.path.basename(file_selected)
@@ -1089,7 +1374,8 @@ class UltimateLargeFileViewer(ctk.CTk):
         )
 
         self.lbl_file.configure(
-            text=f"파일 구조 분석 중... : {filename} ({self.filesize_text})", text_color="#ffcc00"
+            text=f"파일 구조 분석 중... : {filename} ({self.filesize_text})",
+            text_color=self.COLOR_WARNING[mode],
         )
         self.btn_open.configure(state="disabled")
         self.btn_close.pack_forget()
@@ -1100,6 +1386,7 @@ class UltimateLargeFileViewer(ctk.CTk):
         t.start()
 
     def index_file_worker(self):
+        mode = self.theme_var.get()
         try:
             file_size = os.path.getsize(self.file_path)
             if file_size == 0:
@@ -1116,7 +1403,7 @@ class UltimateLargeFileViewer(ctk.CTk):
                             0,
                             lambda: self.lbl_file.configure(
                                 text=f"인덱싱 중... 0% (0 줄 발견) | {os.path.basename(self.file_path)} (Rust 가속)",
-                                text_color="#ffcc00",
+                                text_color=self.COLOR_WARNING[mode],
                             ),
                         )
 
@@ -1142,7 +1429,6 @@ class UltimateLargeFileViewer(ctk.CTk):
                     return
                 except Exception as rust_err:
                     print(f"[디버그] Rust 인덱싱 코어 예외 발생, 파이썬 모드로 전환: {rust_err}")
-                    traceback.print_exc()
 
             self.current_engine_used_rust = False
             self.line_offsets = [0]
@@ -1194,10 +1480,11 @@ class UltimateLargeFileViewer(ctk.CTk):
             else self.encoding_var.get()
         )
         mode_label = "Rust 가속" if is_rust else "파이썬 모드"
+        mode = self.theme_var.get()
 
         self.lbl_file.configure(
             text=f"인덱싱 중... {pct}% ({line_count:,}줄) | {filename} | {mode_label} | {enc_lbl}",
-            text_color="#ffcc00",
+            text_color=self.COLOR_WARNING[mode],
         )
 
     def _show_progressive_content(self):
@@ -1212,9 +1499,6 @@ class UltimateLargeFileViewer(ctk.CTk):
         self.set_scroll_bar_position(0)
         self.render_view(0)
 
-    # =========================================================================
-    # [가독성 개선 부분] 두 번째 이미지의 출력 텍스트 형태를 명확하고 직관적으로 변경
-    # =========================================================================
     def on_indexing_complete(self):
         filename = os.path.basename(self.file_path)
         enc_lbl = (
@@ -1223,13 +1507,13 @@ class UltimateLargeFileViewer(ctk.CTk):
             else self.encoding_var.get()
         )
         mode_label = "Rust 가속" if self.current_engine_used_rust else "Python"
+        mode = self.theme_var.get()
 
-        # 직관적인 구분자(|)와 명확한 문구 표현으로 가독성 대폭 향상
         display_text = f"📄 {filename} ({self.filesize_text})  |  총 {self.total_lines:,} 줄  |  엔진: {mode_label}  |  인코딩: {enc_lbl}"
 
         self.lbl_file.configure(
             text=display_text,
-            text_color="#58a6ff",  # 가독성 뛰어난 소프트 블루 컬러 적용
+            text_color=self.COLOR_INFO[mode],
         )
         self.btn_open.configure(state="normal")
         self.btn_close.pack(side="left", padx=(0, 5), pady=10, after=self.btn_open)
@@ -1248,7 +1532,8 @@ class UltimateLargeFileViewer(ctk.CTk):
         self.render_view(self.current_start_line)
 
     def reset_open_button(self):
-        self.lbl_file.configure(text="파일 로드에 실패했습니다.", text_color="#ff4444")
+        mode = self.theme_var.get()
+        self.lbl_file.configure(text="파일 로드에 실패했습니다.", text_color=self.COLOR_ERROR[mode])
         self.btn_open.configure(state="normal")
         self.btn_close.pack_forget()
         self.combo_encoding.configure(state="normal")
@@ -1274,10 +1559,11 @@ class UltimateLargeFileViewer(ctk.CTk):
         self.text_area.delete("1.0", "end")
         self.text_area.configure(state="disabled")
 
+        mode = self.theme_var.get()
         self.lbl_content_title.configure(text="FILE CONTENTS (0 / 0 줄)")
         self.lbl_file.configure(
-            text="선택된 파일이 없습니다. 인코딩을 지정하고 [파일 열기] 버튼을 누르세요.",
-            text_color="#aaaaaa",
+            text="선택된 파일이 없습니다. [파일 열기] 버튼을 누르세요.",
+            text_color=self.COLOR_MUTED[mode],
         )
         self.v_scrollbar.set(0.0, 1.0)
         self.btn_close.pack_forget()
@@ -1290,7 +1576,7 @@ class UltimateLargeFileViewer(ctk.CTk):
     def _deferred_update_visible_count(self):
         if not self.winfo_exists():
             return
-        line_height = 13 + 8 + 4
+        line_height = self.current_font_size + 8 + 4
         widget_height = self.text_area.winfo_height()
         if widget_height > 20:
             self.max_visible_lines = (widget_height // line_height) + 1
@@ -1352,7 +1638,6 @@ class UltimateLargeFileViewer(ctk.CTk):
         enc = self._get_selected_encoding()
 
         try:
-            # Prefetching 전략 실행
             p_start, p_end = self.prefetch_range
             if start_line < p_start or end_line > p_end:
                 fetch_start = max(0, start_line - self.prefetch_margin)
@@ -1367,20 +1652,24 @@ class UltimateLargeFileViewer(ctk.CTk):
             full_text = "".join(text_parts)
             self.text_area.insert("end", full_text)
 
-            # 라인 하이라이트 처리
+            # 선명한 하이라이트 색상 보정 (명도 차이가 확실한 노란색 적용)
+            highlight_bg = "#f1c40f"
+            highlight_fg = "#000000"
+
             if highlight_line is not None and start_line <= highlight_line < end_line:
                 line_offset_in_view = highlight_line - start_line + 1
                 line_start_pos = f"{line_offset_in_view}.0"
                 line_end_pos = f"{line_offset_in_view}.end"
 
                 self.text_area.tag_config(
-                    "highlight_line_tag", background="#d4d420", foreground="#000000"
+                    "highlight_line_tag", background=highlight_bg, foreground=highlight_fg
                 )
                 self.text_area.tag_add("highlight_line_tag", line_start_pos, line_end_pos)
 
-            # 키워드 하이라이트 기능
             if highlight_keyword:
-                self.text_area.tag_config("highlight", background="#d4d420", foreground="#000000")
+                self.text_area.tag_config(
+                    "highlight", background=highlight_bg, foreground=highlight_fg
+                )
                 search_start = "1.0"
 
                 while True:
@@ -1403,9 +1692,7 @@ class UltimateLargeFileViewer(ctk.CTk):
                     self.text_area.tag_add("highlight", pos, f"{pos}+{kw_len}c")
                     search_start = f"{pos}+{kw_len}c"
 
-            # sel(마우스 드래그 선택 영역) 태그의 우선순위를 최상위로 끌어올림
             self.text_area.tag_raise("sel")
-
             self.text_area.configure(state="disabled")
         except Exception as e:
             print(f"Render error: {e}")
@@ -1457,8 +1744,11 @@ class UltimateLargeFileViewer(ctk.CTk):
             if not save_dir:
                 return
 
+            mode = self.theme_var.get()
             self.is_splitting = True
-            self.lbl_file.configure(text="파일 분할 내보내기 진행 중...", text_color="#ffcc00")
+            self.lbl_file.configure(
+                text="파일 분할 내보내기 진행 중...", text_color=self.COLOR_WARNING[mode]
+            )
             self.popup_progress_window(
                 "파일 분할 작업 진행률", "파일 분할 중입니다. 잠시만 기다려주세요..."
             )
@@ -1488,7 +1778,8 @@ class UltimateLargeFileViewer(ctk.CTk):
         self.prog_lbl_msg = ctk.CTkLabel(self.prog_win, text=msg_text, font=("Malgun Gothic", 12))
         self.prog_lbl_msg.pack(pady=(20, 5), padx=20, fill="x")
 
-        self.prog_bar = ctk.CTkProgressBar(self.prog_win, width=380)
+        # 진행율 바 가독성을 위해 progress_color 명시적 세팅
+        self.prog_bar = ctk.CTkProgressBar(self.prog_win, width=380, progress_color="#1f618d")
         self.prog_bar.set(0.0)
         self.prog_bar.pack(pady=10, padx=20)
 
@@ -1538,11 +1829,9 @@ class UltimateLargeFileViewer(ctk.CTk):
 
                     target_end_offset = current_offset + target_chunk_bytes
 
-                    # 마지막 파트인 경우
                     if target_end_offset >= file_total_size:
                         actual_end_offset = file_total_size
                     else:
-                        # 오프셋 기반 이분 탐색(Bisect)으로 분할 라인 즉시 도출
                         if self.current_engine_used_rust and self.rust_core is not None:
                             mm = self.mmap_obj
                             nl_pos = mm.find(b"\n", target_end_offset)
@@ -1561,12 +1850,11 @@ class UltimateLargeFileViewer(ctk.CTk):
                     if bytes_to_write <= 0:
                         break
 
-                    # 64MB 대용량 블록 I/O 쓰기
                     part_filepath = os.path.join(save_dir, f"{base_filename}_part{part_num}{ext}")
                     f_src.seek(current_offset)
 
                     with open(part_filepath, "wb") as f_dst:
-                        buffer_size = 64 * 1024 * 1024  # 64MB 버퍼
+                        buffer_size = 64 * 1024 * 1024
                         written = 0
                         while written < bytes_to_write:
                             to_read = min(buffer_size, bytes_to_write - written)
@@ -1579,7 +1867,6 @@ class UltimateLargeFileViewer(ctk.CTk):
                     part_num += 1
                     current_offset = actual_end_offset
 
-                    # GUI UI 주기적 갱신
                     current_time = time.time()
                     if current_time - last_ui_update_time >= 0.1:
                         pct_float = current_offset / file_total_size
@@ -1617,6 +1904,7 @@ class UltimateLargeFileViewer(ctk.CTk):
 
     def _on_split_complete(self, success):
         self.is_splitting = False
+        mode = self.theme_var.get()
         if not self.file_path:
             return
         filename = os.path.basename(self.file_path)
@@ -1630,10 +1918,12 @@ class UltimateLargeFileViewer(ctk.CTk):
             display_text = f"📄 {filename} ({self.filesize_text})  |  총 {self.total_lines:,} 줄  |  엔진: {mode_label}  |  인코딩: {enc_lbl}"
             self.lbl_file.configure(
                 text=display_text,
-                text_color="#58a6ff",
+                text_color=self.COLOR_INFO[mode],
             )
         else:
-            self.lbl_file.configure(text="파일 분할 처리에 실패했습니다.", text_color="#ff4444")
+            self.lbl_file.configure(
+                text="파일 분할 처리에 실패했습니다.", text_color=self.COLOR_ERROR[mode]
+            )
 
     def popup_merge_dialog(self):
         if self.is_indexing or self.is_splitting or self.is_merging:
@@ -1649,7 +1939,6 @@ class UltimateLargeFileViewer(ctk.CTk):
             messagebox.showwarning("안내", "최소 2개 이상의 파일을 선택해야 병합할 수 있습니다.")
             return
 
-        # 자연스러운 숫자 정렬 (Natural Sort: part1 -> part2 -> part10)
         def natural_sort_key(s):
             return [int(text) if text.isdigit() else text.lower() for text in re.split(r"(\d+)", s)]
 
@@ -1685,9 +1974,12 @@ class UltimateLargeFileViewer(ctk.CTk):
         lbl_info.pack(pady=10)
 
         def run_merge():
+            mode = self.theme_var.get()
             dialog.destroy()
             self.is_merging = True
-            self.lbl_file.configure(text="여러 텍스트 파일 병합 진행 중...", text_color="#ffcc00")
+            self.lbl_file.configure(
+                text="여러 텍스트 파일 병합 진행 중...", text_color=self.COLOR_WARNING[mode]
+            )
             self.popup_progress_window(
                 "파일 병합 작업 진행률", "파일을 순서대로 통합 병합 중입니다..."
             )
@@ -1732,7 +2024,7 @@ class UltimateLargeFileViewer(ctk.CTk):
         last_ui_update_time = time.time()
 
         try:
-            buffer_size = 64 * 1024 * 1024  # 64MB 버퍼
+            buffer_size = 64 * 1024 * 1024
 
             with open(dst_file, "wb") as f_dst:
                 for idx, file_path in enumerate(valid_files):
@@ -1797,10 +2089,11 @@ class UltimateLargeFileViewer(ctk.CTk):
 
     def _on_merge_complete(self, success):
         self.is_merging = False
+        mode = self.theme_var.get()
         if not self.file_path:
             self.lbl_file.configure(
-                text="선택된 파일이 없습니다. 인코딩을 지정하고 [파일 열기] 버튼을 누르세요.",
-                text_color="#aaaaaa",
+                text="선택된 파일이 없습니다. [파일 열기] 버튼을 누르세요.",
+                text_color=self.COLOR_MUTED[mode],
             )
             return
         filename = os.path.basename(self.file_path)
@@ -1814,10 +2107,12 @@ class UltimateLargeFileViewer(ctk.CTk):
             display_text = f"📄 {filename} ({self.filesize_text})  |  총 {self.total_lines:,} 줄  |  엔진: {mode_label}  |  인코딩: {enc_lbl}"
             self.lbl_file.configure(
                 text=display_text,
-                text_color="#58a6ff",
+                text_color=self.COLOR_INFO[mode],
             )
         else:
-            self.lbl_file.configure(text="파일 병합 처리에 실패했습니다.", text_color="#ff4444")
+            self.lbl_file.configure(
+                text="파일 병합 처리에 실패했습니다.", text_color=self.COLOR_ERROR[mode]
+            )
 
     def safe_select_all(self, event):
         if self.total_lines > 10000:
