@@ -14,7 +14,6 @@ MESSAGES = [
     "Connection timeout with payment gateway",
     "High memory usage detected (85%)",
 ]
-
 print(f"[{LOG_FILE}] 파일에 실시간 로그를 생성을 시작합니다... (Ctrl+C 로 종료)")
 
 try:
