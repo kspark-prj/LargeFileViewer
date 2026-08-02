@@ -190,7 +190,7 @@ class UltimateLargeFileViewer(ctk.CTk):
     def __init__(self):
         super().__init__()
 
-        self.title("Ultimate Large File Viewer & Searcher (SIMD Super-Fast) V1.10.0")
+        self.title("Ultimate Large File Viewer & Searcher (SIMD Super-Fast) V1.0.0")
         self.geometry("1150x850")
         self.minsize(900, 650)
 
