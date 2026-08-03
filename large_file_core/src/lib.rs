@@ -128,130 +128,142 @@ impl FileIndexCore {
         let mmap = self.mmap.as_ref().unwrap().clone();
         let line_offsets = &self.line_offsets;
 
-        let line_indices = Arc::new(Mutex::new(Vec::with_capacity(2000)));
-        let total_found = Arc::new(Mutex::new(0usize));
+        let results: Vec<Vec<usize>> = py.allow_threads(|| {
+            let chunk_size = 32 * 1024 * 1024;
+            let file_len = mmap.len();
 
-        if use_regex {
-            let pattern_str = match std::str::from_utf8(&pattern) {
-                Ok(s) => s,
-                Err(_) => {
-                    return Err(pyo3::exceptions::PyValueError::new_err(
-                        "Invalid UTF-8 regex pattern",
-                    ))
-                }
-            };
+            let chunks: Vec<(usize, usize)> = (0..file_len)
+                .step_by(chunk_size)
+                .map(|start| {
+                    let end = std::cmp::min(start + chunk_size, file_len);
+                    (start, end)
+                })
+                .collect();
 
-            let re = match RegexBuilder::new(pattern_str).multi_line(true).build() {
-                Ok(r) => r,
-                Err(e) => {
-                    return Err(pyo3::exceptions::PyValueError::new_err(format!(
-                        "Regex syntax error: {}",
-                        e
-                    )))
-                }
-            };
+            if use_regex {
+                let pattern_str = match std::str::from_utf8(&pattern) {
+                    Ok(s) => s,
+                    Err(_) => {
+                        return Err(pyo3::exceptions::PyValueError::new_err(
+                            "Invalid UTF-8 regex pattern",
+                        ))
+                    }
+                };
 
-            py.allow_threads(|| {
-                let mut last_line_idx = None;
+                let re = match RegexBuilder::new(pattern_str).multi_line(true).build() {
+                    Ok(r) => r,
+                    Err(e) => {
+                        return Err(pyo3::exceptions::PyValueError::new_err(format!(
+                            "Regex syntax error: {}",
+                            e
+                        )))
+                    }
+                };
 
-                for m in re.find_iter(&mmap) {
-                    let offset = m.start() as u64;
+                let local_results: Result<Vec<Vec<usize>>, pyo3::PyErr> = chunks
+                    .into_par_iter()
+                    .map(|(c_start, c_end)| {
+                        let sub_slice = &mmap[c_start..c_end];
+                        let mut local_indices = Vec::new();
+                        let mut last_line_idx = None;
 
-                    let line_idx = match line_offsets.binary_search(&offset) {
-                        Ok(idx) => idx,
-                        Err(idx) => {
-                            if idx > 0 {
-                                idx - 1
-                            } else {
-                                0
+                        let start_line_idx = match line_offsets.binary_search(&(c_start as u64)) {
+                            Ok(idx) => idx,
+                            Err(idx) => idx.saturating_sub(1),
+                        };
+                        let end_line_idx = match line_offsets.binary_search(&(c_end as u64)) {
+                            Ok(idx) => idx,
+                            Err(idx) => idx,
+                        };
+                        let local_slice = &line_offsets[start_line_idx..std::cmp::min(end_line_idx + 1, line_offsets.len())];
+
+                        for m in re.find_iter(sub_slice) {
+                            let abs_offset = c_start + m.start();
+                            let local_idx = match local_slice.binary_search(&(abs_offset as u64)) {
+                                Ok(idx) => idx,
+                                Err(idx) => idx.saturating_sub(1),
+                            };
+                            let line_idx = start_line_idx + local_idx;
+
+                            if Some(line_idx) != last_line_idx {
+                                local_indices.push(line_idx);
+                                last_line_idx = Some(line_idx);
+                                if local_indices.len() >= 2000 {
+                                    break;
+                                }
                             }
                         }
-                    };
-
-                    if Some(line_idx) != last_line_idx {
-                        let mut tf = total_found.lock().unwrap();
-                        *tf += 1;
-
-                        let mut li = line_indices.lock().unwrap();
-                        if li.len() < 2000 {
-                            li.push(line_idx);
-                        } else {
-                            break;
-                        }
-                        last_line_idx = Some(line_idx);
-                    }
-                }
-            });
-        } else {
-            py.allow_threads(|| {
-                let chunk_size = 32 * 1024 * 1024;
-                let file_len = mmap.len();
-
-                let chunks: Vec<(usize, usize)> = (0..file_len)
-                    .step_by(chunk_size)
-                    .map(|start| {
-                        (
-                            start,
-                            std::cmp::min(start + chunk_size + pattern.len(), file_len),
-                        )
+                        Ok(local_indices)
                     })
                     .collect();
 
-                chunks.into_par_iter().for_each(|(c_start, c_end)| {
-                    let sub_slice = &mmap[c_start..c_end];
+                local_results
+            } else {
+                let local_results: Result<Vec<Vec<usize>>, pyo3::PyErr> = chunks
+                    .into_par_iter()
+                    .map(|(c_start, c_end)| {
+                        let search_end = std::cmp::min(c_end + pattern.len(), file_len);
+                        let sub_slice = &mmap[c_start..search_end];
+                        let mut local_indices = Vec::new();
+                        let mut last_line_idx = None;
 
-                    if !sub_slice.contains(&pattern[0]) {
-                        return;
-                    }
+                        if !sub_slice.contains(&pattern[0]) {
+                            return Ok(local_indices);
+                        }
 
-                    let finder = memmem::Finder::new(&pattern);
-                    for pos in finder.find_iter(sub_slice) {
-                        let abs_offset = (c_start + pos) as u64;
-
-                        let line_idx = match line_offsets.binary_search(&abs_offset) {
+                        let start_line_idx = match line_offsets.binary_search(&(c_start as u64)) {
                             Ok(idx) => idx,
-                            Err(idx) => {
-                                if idx > 0 {
-                                    idx - 1
-                                } else {
-                                    0
+                            Err(idx) => idx.saturating_sub(1),
+                        };
+                        let end_line_idx = match line_offsets.binary_search(&(search_end as u64)) {
+                            Ok(idx) => idx,
+                            Err(idx) => idx,
+                        };
+                        let local_slice = &line_offsets[start_line_idx..std::cmp::min(end_line_idx + 1, line_offsets.len())];
+
+                        let finder = memmem::Finder::new(&pattern);
+                        for pos in finder.find_iter(sub_slice) {
+                            let abs_offset = c_start + pos;
+                            let local_idx = match local_slice.binary_search(&(abs_offset as u64)) {
+                                Ok(idx) => idx,
+                                Err(idx) => idx.saturating_sub(1),
+                            };
+                            let line_idx = start_line_idx + local_idx;
+
+                            if Some(line_idx) != last_line_idx {
+                                local_indices.push(line_idx);
+                                last_line_idx = Some(line_idx);
+                                if local_indices.len() >= 2000 {
+                                    break;
                                 }
                             }
-                        };
-
-                        let mut tf = total_found.lock().unwrap();
-                        if *tf >= 2000 {
-                            break;
                         }
+                        Ok(local_indices)
+                    })
+                    .collect();
 
-                        let mut li = line_indices.lock().unwrap();
-                        if li.is_empty() || *li.last().unwrap() != line_idx {
-                            *tf += 1;
-                            if li.len() < 2000 {
-                                li.push(line_idx);
-                            }
-                        }
-                    }
-                });
-            });
+                local_results
+            }
+        })?;
+
+        let mut final_indices = Vec::new();
+        for mut chunk_res in results {
+            final_indices.append(&mut chunk_res);
+        }
+        final_indices.sort_unstable();
+        final_indices.dedup();
+
+        let total_found = final_indices.len();
+        if final_indices.len() > 2000 {
+            final_indices.truncate(2000);
         }
 
-        let mut res_indices = match Arc::try_unwrap(line_indices) {
-            Ok(mutex) => mutex.into_inner().unwrap(),
-            Err(arc) => arc.lock().unwrap().clone(),
-        };
-
-        res_indices.sort_unstable();
-        res_indices.dedup();
-
-        let res_matches: Vec<String> = res_indices
+        let res_matches: Vec<String> = final_indices
             .iter()
             .map(|&idx| format!("Line {}", idx + 1))
             .collect();
 
-        let res_total = *total_found.lock().unwrap();
-
-        Ok((res_matches, res_indices, res_total))
+        Ok((res_matches, final_indices, total_found))
     }
 
     fn get_offset(&self, index: usize) -> Option<u64> {
