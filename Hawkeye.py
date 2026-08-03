@@ -557,18 +557,15 @@ class UltimateLargeFileViewer(ctk.CTk):
         ctk.set_appearance_mode(mode)
 
         if mode == "Light":
-            # 상단 메뉴바 영역 라이트 테마 색상 적용
             self.menu_bar.configure(fg_color="#e0e0e0")
             self.menu_sep.configure(fg_color="#cccccc")
             for btn in (self.menu_file_btn, self.menu_tools_btn, self.menu_settings_btn):
                 btn.configure(text_color="#000000", hover_color="#c8c8c8")
 
-            # 커스텀 드롭다운 메뉴 스타일 변경
             self.file_dropdown_custom.apply_theme_style("Light")
             self.tools_dropdown_custom.apply_theme_style("Light")
             self.settings_dropdown_custom.apply_theme_style("Light")
 
-            # 라이트 테마 시 인코딩 콤보박스 하얗게 변경하여 가독성 확보
             self.combo_encoding.configure(
                 fg_color="#ffffff",
                 button_color="#e0e0e0",
@@ -579,7 +576,6 @@ class UltimateLargeFileViewer(ctk.CTk):
                 dropdown_hover_color="#e0e0e0",
             )
 
-            # 라이트 모드 스타일 적용
             self.text_area.configure(fg_color="#f8f9fa", text_color="#1e1e1e")
             self.result_listbox.configure(
                 bg="#ffffff",
@@ -599,7 +595,6 @@ class UltimateLargeFileViewer(ctk.CTk):
             )
             self.style.map("Dark.Vertical.TScrollbar", background=[("active", "#a0a0a0")])
 
-            # 헤더 파일 라벨 가독성 업데이트
             if not self.file_path:
                 self.lbl_file.configure(text_color=self.COLOR_MUTED["Light"])
             else:
@@ -617,18 +612,15 @@ class UltimateLargeFileViewer(ctk.CTk):
             self.lbl_limit_info.configure(text_color=self.COLOR_WARNING["Light"])
 
         else:
-            # 상단 메뉴바 영역 다크 테마 색상 적용
             self.menu_bar.configure(fg_color="#1e1e1e")
             self.menu_sep.configure(fg_color="#2b2b2b")
             for btn in (self.menu_file_btn, self.menu_tools_btn, self.menu_settings_btn):
                 btn.configure(text_color="#ffffff", hover_color="#2d2d2d")
 
-            # 커스텀 드롭다운 메뉴 스타일 변경
             self.file_dropdown_custom.apply_theme_style("Dark")
             self.tools_dropdown_custom.apply_theme_style("Dark")
             self.settings_dropdown_custom.apply_theme_style("Dark")
 
-            # 다크 테마 인코딩 콤보박스 색상 복구
             self.combo_encoding.configure(
                 fg_color="#3a3a3a",
                 button_color="#4a4a4a",
@@ -639,7 +631,6 @@ class UltimateLargeFileViewer(ctk.CTk):
                 dropdown_hover_color="#3a3a3a",
             )
 
-            # 다크 모드 스타일 적용
             self.text_area.configure(fg_color="#2b2b2b", text_color="#a9b7c6")
             self.result_listbox.configure(
                 bg="#1e1e1e",
@@ -659,7 +650,6 @@ class UltimateLargeFileViewer(ctk.CTk):
             )
             self.style.map("Dark.Vertical.TScrollbar", background=[("active", "#4f4f4f")])
 
-            # 헤더 파일 라벨 가독성 업데이트
             if not self.file_path:
                 self.lbl_file.configure(text_color=self.COLOR_MUTED["Dark"])
             else:
@@ -729,10 +719,9 @@ class UltimateLargeFileViewer(ctk.CTk):
     def _on_text_drag_start(self, event):
         self.is_selecting = True
         self._drag_direction = 0
-        # 클릭 위치의 텍스트 위젯 라인(1-indexed) → 파일 라인으로 변환
         try:
             click_index = self.text_area._textbox.index(f"@{event.x},{event.y}")
-            widget_line = int(click_index.split(".")[0])  # 1-indexed
+            widget_line = int(click_index.split(".")[0])
             file_line = self.current_start_line + (widget_line - 1)
             self._drag_select_start_file_line = file_line
             self._drag_select_end_file_line = file_line
@@ -746,9 +735,8 @@ class UltimateLargeFileViewer(ctk.CTk):
             return
 
         widget_height = self.text_area.winfo_height()
-        edge_margin = 20  # 경계로부터 이 픽셀 이내면 스크롤
+        edge_margin = 20
 
-        # 현재 마우스 위치의 위젯 라인 → 파일 라인 추적
         try:
             cur_index = self.text_area._textbox.index(f"@{event.x},{event.y}")
             widget_line = int(cur_index.split(".")[0])
@@ -757,17 +745,14 @@ class UltimateLargeFileViewer(ctk.CTk):
             pass
 
         if event.y < edge_margin:
-            # 위쪽 경계 → 위로 스크롤
             self._drag_direction = -1
             if self._drag_scroll_timer is None:
                 self._drag_auto_scroll()
         elif event.y > widget_height - edge_margin:
-            # 아래쪽 경계 → 아래로 스크롤
             self._drag_direction = 1
             if self._drag_scroll_timer is None:
                 self._drag_auto_scroll()
         else:
-            # 경계 밖 → 타이머 취소
             self._drag_direction = 0
             self._cancel_drag_scroll()
 
@@ -786,7 +771,6 @@ class UltimateLargeFileViewer(ctk.CTk):
         new_start = max(f_start, min(new_start, max_scroll_limit))
 
         if new_start != self.current_start_line:
-            # 드래그 선택 끝 위치 갱신
             if self._drag_direction > 0:
                 self._drag_select_end_file_line = new_start + self.max_visible_lines - 1
             else:
@@ -796,7 +780,6 @@ class UltimateLargeFileViewer(ctk.CTk):
             self.set_scroll_bar_position(new_start)
             self._render_view_for_drag(new_start)
 
-        # 50ms 간격으로 반복
         self._drag_scroll_timer = self.after(50, self._drag_auto_scroll)
 
     def _render_view_for_drag(self, start_line):
@@ -841,7 +824,6 @@ class UltimateLargeFileViewer(ctk.CTk):
             full_text = "".join(text_parts)
             self.text_area.insert("end", full_text)
 
-            # 현재 뷰에서 선택 범위에 해당하는 라인 하이라이트
             sel_start = min(self._drag_select_start_file_line, self._drag_select_end_file_line)
             sel_end = max(self._drag_select_start_file_line, self._drag_select_end_file_line)
 
@@ -2262,7 +2244,6 @@ class UltimateLargeFileViewer(ctk.CTk):
 
     def safe_copy(self, event):
         try:
-            # 드래그 선택으로 다중 페이지를 선택한 경우: mmap에서 직접 읽기
             if (
                 self._drag_select_start_file_line is not None
                 and self._drag_select_end_file_line is not None

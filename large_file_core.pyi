@@ -11,15 +11,5 @@ class FileIndexCore:
         self,
         pattern: bytes,
         use_regex: bool = False,
-    ) -> tuple[list[str], list[int], int]:
-        """이미 인덱싱된 데이터를 바탕으로 키워드 또는 정규식(use_regex) 패턴을 검색합니다.
-
-        Args:
-            pattern (bytes): 검색할 바이트 패턴
-            use_regex (bool): 정규식 검색 사용 여부 (기본값: False)
-
-        Returns:
-            tuple[list[str], list[int], int]: (라인 표기 목록, 라인 인덱스 목록, 총 검색 수)
-        """
-
+    ) -> tuple[list[str], list[int], int]: ...
     def get_offset(self, index: int) -> int | None: ...
