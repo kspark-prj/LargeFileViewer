@@ -2,6 +2,8 @@ import bisect
 import mmap
 import os
 import re
+import socket
+import sys
 import threading
 import time
 import tkinter as tk
@@ -131,15 +133,19 @@ class CTkCustomMenu(ctk.CTkFrame):
                 )
 
     def show(self, x, y):
+        """컨텍스트 메뉴 표시 및 외부 클릭 바인딩 설정"""
         self.place(x=x, y=y)
         self.lift()
+        self.focus_set()
         self.after(10, self._bind_click)
 
     def _bind_click(self):
         if self.winfo_exists():
-            self._bind_id = self.master_window.bind("<Button-1>", self._on_outside_click, add="+")
+            if self._bind_id is None:
+                self._bind_id = self.master_window.bind("<Button-1>", self._on_outside_click, add="+")
 
     def hide(self):
+        """컨텍스트 메뉴 숨기기 및 이벤트 해제"""
         self.place_forget()
         if self._bind_id:
             try:
@@ -149,24 +155,26 @@ class CTkCustomMenu(ctk.CTkFrame):
             self._bind_id = None
 
     def _on_item_click(self, command):
+        self.hide()
         if command:
             try:
                 command()
             except Exception as e:
                 print(f"Menu action error: {e}")
-        self.hide()
 
     def _on_option_click(self, val, command):
+        self.hide()
         if command:
             try:
                 command(val)
             except Exception as e:
                 print(f"Option action error: {e}")
-        self.hide()
 
     def _on_outside_click(self, event):
         if not self.winfo_exists():
             return
+        
+        # 클락된 위젯이 메뉴 자신 내부인지 확인
         widget = event.widget
         try:
             x, y = event.x_root, event.y_root
@@ -176,17 +184,20 @@ class CTkCustomMenu(ctk.CTkFrame):
                 return
         except Exception:
             pass
-        if widget in [
+
+        # 메뉴 버튼 트리거 자체를 눌렀을 때의 중복 토글 방지 처리
+        if hasattr(self.master_window, 'menu_file_btn') and widget in [
             self.master_window.menu_file_btn,
             self.master_window.menu_tools_btn,
             self.master_window.menu_settings_btn,
         ]:
             return
+
         self.hide()
 
 
 class UltimateLargeFileViewer(ctk.CTk):
-    def __init__(self):
+    def __init__(self, initial_file_path=None):
         super().__init__()
 
         self.title("Ultimate Large File Viewer & Searcher (SIMD Super-Fast) V1.2.0")
@@ -551,6 +562,10 @@ class UltimateLargeFileViewer(ctk.CTk):
 
         self.bind("<Control-f>", lambda event: self.toggle_search_panel())
         self.bind("<Control-F>", lambda event: self.toggle_search_panel())
+
+        # [컨텍스트 메뉴 호출 지원] 외부 경로를 전달받은 경우 앱 로드 후 즉시 열기
+        if initial_file_path and os.path.exists(initial_file_path):
+            self.after(100, lambda: self.start_open_file_thread(initial_file_path))
 
     def change_theme_mode(self, mode):
         """다크 / 라이트 테마 모드 변경 처리 및 가독성 개선"""
@@ -1179,18 +1194,16 @@ class UltimateLargeFileViewer(ctk.CTk):
         self.tools_dropdown_custom = CTkCustomMenu(self, self, tools_items)
         self.settings_dropdown_custom = CTkCustomMenu(self, self, settings_items)
 
-        self.menu_file_btn.bind("<Button-1>", lambda event: self._toggle_file_menu())
-        self.menu_tools_btn.bind("<Button-1>", lambda event: self._toggle_tools_menu())
-        self.menu_settings_btn.bind("<Button-1>", lambda event: self._toggle_settings_menu())
+        self.menu_file_btn.configure(command=self._toggle_file_menu)
+        self.menu_tools_btn.configure(command=self._toggle_tools_menu)
+        self.menu_settings_btn.configure(command=self._toggle_settings_menu)
 
     def _toggle_file_menu(self):
         if self.file_dropdown_custom.winfo_manager():
             self.file_dropdown_custom.hide()
         else:
-            if self.tools_dropdown_custom.winfo_manager():
-                self.tools_dropdown_custom.hide()
-            if self.settings_dropdown_custom.winfo_manager():
-                self.settings_dropdown_custom.hide()
+            self.tools_dropdown_custom.hide()
+            self.settings_dropdown_custom.hide()
             x = self.menu_file_btn.winfo_x()
             y = self.menu_file_btn.winfo_y() + self.menu_file_btn.winfo_height() + 2
             self.file_dropdown_custom.show(x, y)
@@ -1199,10 +1212,8 @@ class UltimateLargeFileViewer(ctk.CTk):
         if self.tools_dropdown_custom.winfo_manager():
             self.tools_dropdown_custom.hide()
         else:
-            if self.file_dropdown_custom.winfo_manager():
-                self.file_dropdown_custom.hide()
-            if self.settings_dropdown_custom.winfo_manager():
-                self.settings_dropdown_custom.hide()
+            self.file_dropdown_custom.hide()
+            self.settings_dropdown_custom.hide()
             x = self.menu_tools_btn.winfo_x()
             y = self.menu_tools_btn.winfo_y() + self.menu_tools_btn.winfo_height() + 2
             self.tools_dropdown_custom.show(x, y)
@@ -1211,10 +1222,8 @@ class UltimateLargeFileViewer(ctk.CTk):
         if self.settings_dropdown_custom.winfo_manager():
             self.settings_dropdown_custom.hide()
         else:
-            if self.file_dropdown_custom.winfo_manager():
-                self.file_dropdown_custom.hide()
-            if self.tools_dropdown_custom.winfo_manager():
-                self.tools_dropdown_custom.hide()
+            self.file_dropdown_custom.hide()
+            self.tools_dropdown_custom.hide()
             x = self.menu_settings_btn.winfo_x()
             y = self.menu_settings_btn.winfo_y() + self.menu_settings_btn.winfo_height() + 2
             self.settings_dropdown_custom.show(x, y)
@@ -1464,14 +1473,18 @@ class UltimateLargeFileViewer(ctk.CTk):
         self.set_scroll_bar_position(0)
         self.render_view(0)
 
-    def start_open_file_thread(self):
+    def start_open_file_thread(self, target_path=None):
+        """파일 열기 스레드 시작 (target_path 전달 시 커스텀 경로 바로 열기 지원)"""
         if self.is_indexing or self.is_searching or self.is_splitting or self.is_merging:
             return
-        file_selected = filedialog.askopenfilename(
-            title="대용량 텍스트 파일 선택",
-            filetypes=[("All files", "*.*"), ("Text/Log files", "*.txt;*.log;*.csv;*.json;*.tsv")],
-        )
+
+        file_selected = target_path
         if not file_selected:
+            file_selected = filedialog.askopenfilename(
+                title="대용량 텍스트 파일 선택",
+                filetypes=[("All files", "*.*"), ("Text/Log files", "*.txt;*.log;*.csv;*.json;*.tsv")],
+            )
+        if not file_selected or not os.path.exists(file_selected):
             return
 
         self.tab_panel_frame.pack_forget()
@@ -2381,6 +2394,87 @@ class UltimateLargeFileViewer(ctk.CTk):
         return "break"
 
 
+SINGLE_INSTANCE_PORT = 48291
+LOCK_FILE_PATH = os.path.join(os.path.expanduser("~"), ".ult_large_file_viewer.lock")
+
+
+def _is_instance_running():
+    """파일 락 및 소켓 연결 시도를 통해 기존 인스턴스 존재 여부를 체크합니다."""
+    if not os.path.exists(LOCK_FILE_PATH):
+        return False
+    try:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.settimeout(0.5)
+        sock.connect(("127.0.0.1", SINGLE_INSTANCE_PORT))
+        sock.close()
+        return True
+    except (socket.error, ConnectionRefusedError, TimeoutError):
+        return False
+
+
+def _send_file_path_to_existing_instance(file_path):
+    """실행 중인 기존 인스턴스에 새로운 파일 경로를 전송합니다."""
+    try:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.connect(("127.0.0.1", SINGLE_INSTANCE_PORT))
+        message = file_path if file_path else "__FOCUS__"
+        sock.sendall(message.encode("utf-8"))
+        sock.close()
+    except Exception as e:
+        print(f"[SingleInstance] 전송 실패: {e}")
+
+
+def _start_ipc_server(app):
+    """메인 인스턴스용 IPC 백그라운드 서버를 시작합니다."""
+    def server_thread():
+        server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        try:
+            server_socket.bind(("127.0.0.1", SINGLE_INSTANCE_PORT))
+            server_socket.listen(5)
+            
+            with open(LOCK_FILE_PATH, "w") as f:
+                f.write(str(os.getpid()))
+
+            while True:
+                conn, _ = server_socket.accept()
+                data = conn.recv(4096)
+                if data:
+                    received_msg = data.decode("utf-8").strip()
+                    if received_msg and received_msg != "__FOCUS__":
+                        if os.path.exists(received_msg):
+                            app.after(0, lambda path=received_msg: app.start_open_file_thread(path))
+                    app.after(0, lambda: (app.deiconify(), app.focus_force(), app.lift()))
+                conn.close()
+        except Exception as e:
+            print(f"[SingleInstance Server Error] {e}")
+        finally:
+            server_socket.close()
+            if os.path.exists(LOCK_FILE_PATH):
+                try:
+                    os.remove(LOCK_FILE_PATH)
+                except Exception:
+                    pass
+
+    t = threading.Thread(target=server_thread, daemon=True)
+    t.start()
+
+
 if __name__ == "__main__":
-    app = UltimateLargeFileViewer()
-    app.mainloop()
+    passed_file_path = sys.argv[1] if len(sys.argv) > 1 else None
+
+    if _is_instance_running():
+        _send_file_path_to_existing_instance(passed_file_path)
+        sys.exit(0)
+    else:
+        app = UltimateLargeFileViewer(initial_file_path=passed_file_path)
+        _start_ipc_server(app)
+        
+        try:
+            app.mainloop()
+        finally:
+            if os.path.exists(LOCK_FILE_PATH):
+                try:
+                    os.remove(LOCK_FILE_PATH)
+                except Exception:
+                    pass
