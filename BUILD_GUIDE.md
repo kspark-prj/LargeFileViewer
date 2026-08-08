@@ -223,10 +223,10 @@ python3 Hawkeye.py
 
 ```bash
 # 단일 바이너리 빌드
-pyinstaller -w -D --noupx --clean --optimize 2 --icon=main.ico --collect-all large_file_core --collect-all customtkinter --exclude-module tkinter.test --exclude-module unittest --exclude-module pydoc --exclude-module email --exclude-module http --exclude-module xml --exclude-module html --exclude-module setuptools --exclude-module distutils --exclude-module pytest Hawkeye.py
+pyinstaller -w -D --noupx --clean --icon=main.ico --collect-all large_file_core --collect-binaries large_file_core --collect-all customtkinter --exclude-module tkinter.test --exclude-module unittest --exclude-module pydoc --exclude-module email --exclude-module http --exclude-module xml --exclude-module html --exclude-module setuptools --exclude-module distutils --exclude-module pytest Hawkeye.py
 ```
 
-빌드 완료 후 **`dist/LargeFileViewer`** 경로에 실행 파일이 생성됩니다.
+빌드 완료 후 **`dist/Hawkeye`** 경로에 실행 파일이 생성됩니다.
 
 ---
 
