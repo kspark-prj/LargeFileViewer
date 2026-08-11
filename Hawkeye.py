@@ -1,27 +1,46 @@
-import bisect
-import mmap
+import json
 import os
 import re
 import socket
 import sys
 import threading
-import time
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
 import customtkinter as ctk
 
-try:
-    import large_file_core
+# Rust 가속 모듈 지연 로딩 (Lazy Loader)
+RUST_AVAILABLE = None
+_large_file_core_module = None
 
-    RUST_AVAILABLE = True
-    print("[LargeFileViewer] Rust 멀티스레드/SIMD 가속 코어가 활성화되었습니다.")
-except ImportError as e:
-    RUST_AVAILABLE = False
-    print(f"[LargeFileViewer] Rust 코어를 로드할 수 없어 파이썬 폴백 모드로 동작합니다: {e}")
+
+def get_rust_module():
+    global RUST_AVAILABLE, _large_file_core_module
+    if RUST_AVAILABLE is None:
+        try:
+            import large_file_core
+
+            _large_file_core_module = large_file_core
+            RUST_AVAILABLE = True
+            print("[LargeFileViewer] Rust 멀티스레드/SIMD 가속 코어가 활성화되었습니다.")
+        except ImportError as e:
+            RUST_AVAILABLE = False
+            print(
+                f"[LargeFileViewer] Rust 코어를 로드할 수 없어 파이썬 폴백 모드로 동작합니다: {e}"
+            )
+    return _large_file_core_module
+
 
 ctk.set_appearance_mode("Dark")
 ctk.set_default_color_theme("blue")
+
+# 실행 파일(.exe) 상태인지, 파이썬 스크립트(.py) 상태인지 확인하여 기준 경로 설정
+if getattr(sys, "frozen", False):
+    BASE_DIR = os.path.dirname(sys.executable)
+else:
+    BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+CONFIG_FILE_PATH = os.path.join(BASE_DIR, "ult_large_file_viewer_config.json")
 
 
 class CTkCustomMenu(ctk.CTkFrame):
@@ -142,7 +161,9 @@ class CTkCustomMenu(ctk.CTkFrame):
     def _bind_click(self):
         if self.winfo_exists():
             if self._bind_id is None:
-                self._bind_id = self.master_window.bind("<Button-1>", self._on_outside_click, add="+")
+                self._bind_id = self.master_window.bind(
+                    "<Button-1>", self._on_outside_click, add="+"
+                )
 
     def hide(self):
         """컨텍스트 메뉴 숨기기 및 이벤트 해제"""
@@ -173,8 +194,7 @@ class CTkCustomMenu(ctk.CTkFrame):
     def _on_outside_click(self, event):
         if not self.winfo_exists():
             return
-        
-        # 클락된 위젯이 메뉴 자신 내부인지 확인
+
         widget = event.widget
         try:
             x, y = event.x_root, event.y_root
@@ -185,13 +205,16 @@ class CTkCustomMenu(ctk.CTkFrame):
         except Exception:
             pass
 
-        # 메뉴 버튼 트리거 자체를 눌렀을 때의 중복 토글 방지 처리
-        if hasattr(self.master_window, 'menu_file_btn') and widget in [
-            self.master_window.menu_file_btn,
-            self.master_window.menu_tools_btn,
-            self.master_window.menu_settings_btn,
-        ]:
-            return
+        if hasattr(self.master_window, "menu_file_btn"):
+            menu_btns = [
+                self.master_window.menu_file_btn,
+                self.master_window.menu_tools_btn,
+                self.master_window.menu_settings_btn,
+            ]
+            w_str = str(widget)
+            for btn in menu_btns:
+                if widget == btn or w_str.startswith(str(btn)):
+                    return
 
         self.hide()
 
@@ -211,9 +234,9 @@ class UltimateLargeFileViewer(ctk.CTk):
         self.detected_encoding = "utf-8"
         self.filesize_text = ""
 
-        # [Prefetching 인메모리 렌더링 캐시]
+        # [Prefetching 인메모리 렌더링 캐시 및 지연 로딩용 속성]
         self.prefetch_buffer = {}
-        self.prefetch_range = (0, 0)
+        self.prefetch_range = (-1, -1)
         self.prefetch_margin = 100
 
         self.current_font_size = 14
@@ -226,9 +249,12 @@ class UltimateLargeFileViewer(ctk.CTk):
         self.COLOR_MUTED = {"Dark": "#aaaaaa", "Light": "#666666"}
 
         self.rust_lock = threading.Lock()
+        self.mmap_lock = threading.Lock()
         self.rust_core = None
-        if RUST_AVAILABLE:
-            self.rust_core = large_file_core.FileIndexCore()
+
+        lfc = get_rust_module()
+        if RUST_AVAILABLE and lfc is not None:
+            self.rust_core = lfc.FileIndexCore()
 
         self.line_offsets = []
         self.current_engine_used_rust = False
@@ -563,9 +589,41 @@ class UltimateLargeFileViewer(ctk.CTk):
         self.bind("<Control-f>", lambda event: self.toggle_search_panel())
         self.bind("<Control-F>", lambda event: self.toggle_search_panel())
 
+        # [저장된 설정 불러오기 및 적용]
+        self.load_config()
+
         # [컨텍스트 메뉴 호출 지원] 외부 경로를 전달받은 경우 앱 로드 후 즉시 열기
         if initial_file_path and os.path.exists(initial_file_path):
             self.after(100, lambda: self.start_open_file_thread(initial_file_path))
+
+    def load_config(self):
+        """저장된 사용자 설정(테마, 폰트 크기) 불러오기"""
+        if os.path.exists(CONFIG_FILE_PATH):
+            try:
+                with open(CONFIG_FILE_PATH, "r", encoding="utf-8") as f:
+                    config = json.load(f)
+                    theme = config.get("theme", "Dark")
+                    font_size = config.get("font_size", "14pt")
+
+                    self.theme_var.set(theme)
+                    self.change_theme_mode(theme)
+
+                    self.font_size_var.set(font_size)
+                    self.change_font_size(font_size)
+            except Exception as e:
+                print(f"[Config] 설정 불러오기 오류: {e}")
+
+    def save_config(self):
+        """현재 사용자 설정(테마, 폰트 크기) 저장"""
+        try:
+            config = {
+                "theme": self.theme_var.get(),
+                "font_size": self.font_size_var.get(),
+            }
+            with open(CONFIG_FILE_PATH, "w", encoding="utf-8") as f:
+                json.dump(config, f, indent=4, ensure_ascii=False)
+        except Exception as e:
+            print(f"[Config] 설정 저장 오류: {e}")
 
     def change_theme_mode(self, mode):
         """다크 / 라이트 테마 모드 변경 처리 및 가독성 개선"""
@@ -684,6 +742,9 @@ class UltimateLargeFileViewer(ctk.CTk):
         if self.file_path and self.total_lines > 0:
             self.render_view(self.current_start_line)
 
+        # 설정 자동 저장
+        self.save_config()
+
     def change_font_size(self, choice):
         """폰트 크기 동적 변경 처리"""
         try:
@@ -692,6 +753,9 @@ class UltimateLargeFileViewer(ctk.CTk):
             self.text_area.configure(font=("Consolas", self.current_font_size))
             self.result_listbox.configure(font=("Consolas", max(10, size_int - 1), "bold"))
             self._deferred_update_visible_count()
+
+            # 설정 자동 저장
+            self.save_config()
         except ValueError:
             pass
 
@@ -799,8 +863,9 @@ class UltimateLargeFileViewer(ctk.CTk):
 
     def _render_view_for_drag(self, start_line):
         """드래그 중 렌더링: 선택 영역을 시각적으로 표시"""
-        if not self.file_path or self.total_lines == 0 or self.mmap_obj is None:
-            return
+        with self.mmap_lock:
+            if not self.file_path or self.total_lines == 0 or self.mmap_obj is None:
+                return
 
         f_start = self.filter_start if self.filter_start is not None else 0
         f_end = self.filter_end if self.filter_end is not None else self.total_lines
@@ -839,16 +904,20 @@ class UltimateLargeFileViewer(ctk.CTk):
             full_text = "".join(text_parts)
             self.text_area.insert("end", full_text)
 
-            sel_start = min(self._drag_select_start_file_line, self._drag_select_end_file_line)
-            sel_end = max(self._drag_select_start_file_line, self._drag_select_end_file_line)
+            if (
+                self._drag_select_start_file_line is not None
+                and self._drag_select_end_file_line is not None
+            ):
+                sel_start = min(self._drag_select_start_file_line, self._drag_select_end_file_line)
+                sel_end = max(self._drag_select_start_file_line, self._drag_select_end_file_line)
 
-            view_sel_start = max(sel_start, start_line)
-            view_sel_end = min(sel_end, end_line - 1)
+                view_sel_start = max(sel_start, start_line)
+                view_sel_end = min(sel_end, end_line - 1)
 
-            if view_sel_start <= view_sel_end:
-                widget_sel_start = view_sel_start - start_line + 1
-                widget_sel_end = view_sel_end - start_line + 1
-                self.text_area.tag_add("sel", f"{widget_sel_start}.0", f"{widget_sel_end}.end")
+                if view_sel_start <= view_sel_end:
+                    widget_sel_start = view_sel_start - start_line + 1
+                    widget_sel_end = view_sel_end - start_line + 1
+                    self.text_area.tag_add("sel", f"{widget_sel_start}.0", f"{widget_sel_end}.end")
 
             self.text_area.tag_raise("sel")
             self.text_area.configure(state="disabled")
@@ -902,6 +971,8 @@ class UltimateLargeFileViewer(ctk.CTk):
             return
 
         def worker():
+            import mmap
+
             try:
                 self.is_indexing = True
                 old_size = self.last_known_file_size
@@ -927,24 +998,31 @@ class UltimateLargeFileViewer(ctk.CTk):
                     self.line_offsets.extend(added_offsets)
                     self.total_lines = len(self.line_offsets)
 
-                if self.mmap_obj is not None:
-                    try:
-                        self.mmap_obj.close()
-                    except Exception:
-                        pass
-                if self.file_handle is not None:
-                    try:
-                        self.file_handle.close()
-                    except Exception:
-                        pass
+                with self.mmap_lock:
+                    if self.mmap_obj is not None:
+                        try:
+                            self.mmap_obj.close()
+                        except Exception:
+                            pass
+                    if self.file_handle is not None:
+                        try:
+                            self.file_handle.close()
+                        except Exception:
+                            pass
 
-                self.file_handle = open(self.file_path, "rb")
-                self.mmap_obj = mmap.mmap(self.file_handle.fileno(), 0, access=mmap.ACCESS_READ)
+                    self.file_handle = open(self.file_path, "rb")
+                    self.mmap_obj = mmap.mmap(self.file_handle.fileno(), 0, access=mmap.ACCESS_READ)
+
+                # [스레드 안정성 보완] UI 조회를 포함한 모든 처리를 메인 스레드로 위임
+                def check_and_apply_scroll():
+                    if self.winfo_exists():
+                        scroll_pos = self.v_scrollbar.get()
+                        if scroll_pos[1] >= 0.90:
+                            self.apply_tab_filter()
 
                 if self.winfo_exists():
-                    scroll_pos = self.v_scrollbar.get()
-                    if scroll_pos[1] >= 0.90:
-                        self.after(0, self.apply_tab_filter)
+                    self.after(0, check_and_apply_scroll)
+
             except Exception as e:
                 print(f"Incremental follow error: {e}")
             finally:
@@ -957,14 +1035,17 @@ class UltimateLargeFileViewer(ctk.CTk):
             return
 
         def worker():
+            import mmap
+
             try:
                 self.is_indexing = True
-                if self.mmap_obj is not None:
-                    try:
-                        self.mmap_obj.close()
-                    except Exception:
-                        pass
-                    self.mmap_obj = None
+                with self.mmap_lock:
+                    if self.mmap_obj is not None:
+                        try:
+                            self.mmap_obj.close()
+                        except Exception:
+                            pass
+                        self.mmap_obj = None
 
                 self.last_known_file_size = os.path.getsize(self.file_path)
 
@@ -987,14 +1068,15 @@ class UltimateLargeFileViewer(ctk.CTk):
                             file_pos = next_pos
                     self.total_lines = len(self.line_offsets)
 
-                if self.file_handle is not None:
-                    try:
-                        self.file_handle.close()
-                    except Exception:
-                        pass
+                with self.mmap_lock:
+                    if self.file_handle is not None:
+                        try:
+                            self.file_handle.close()
+                        except Exception:
+                            pass
 
-                self.file_handle = open(self.file_path, "rb")
-                self.mmap_obj = mmap.mmap(self.file_handle.fileno(), 0, access=mmap.ACCESS_READ)
+                    self.file_handle = open(self.file_path, "rb")
+                    self.mmap_obj = mmap.mmap(self.file_handle.fileno(), 0, access=mmap.ACCESS_READ)
 
                 if self.winfo_exists():
                     self.after(0, self.apply_tab_filter)
@@ -1007,18 +1089,19 @@ class UltimateLargeFileViewer(ctk.CTk):
 
     def _close_mmap(self):
         self.stop_following()
-        if self.mmap_obj is not None:
-            try:
-                self.mmap_obj.close()
-            except Exception:
-                pass
-            self.mmap_obj = None
-        if self.file_handle is not None:
-            try:
-                self.file_handle.close()
-            except Exception:
-                pass
-            self.file_handle = None
+        with self.mmap_lock:
+            if self.mmap_obj is not None:
+                try:
+                    self.mmap_obj.close()
+                except Exception:
+                    pass
+                self.mmap_obj = None
+            if self.file_handle is not None:
+                try:
+                    self.file_handle.close()
+                except Exception:
+                    pass
+                self.file_handle = None
 
         self.line_offsets = []
         self.total_lines = 0
@@ -1026,7 +1109,7 @@ class UltimateLargeFileViewer(ctk.CTk):
         self.filter_start = None
         self.filter_end = None
         self.prefetch_buffer.clear()
-        self.prefetch_range = (0, 0)
+        self.prefetch_range = (-1, -1)
 
     def destroy(self):
         self.stop_following()
@@ -1232,9 +1315,7 @@ class UltimateLargeFileViewer(ctk.CTk):
         if not self.file_path:
             messagebox.showinfo("안내", "파일을 먼저 열어주세요.")
             return
-        self._force_close_search_panel()
 
-    def _force_close_search_panel(self):
         mode = self.theme_var.get()
         if self.search_panel_visible:
             self.search_panel_frame.pack_forget()
@@ -1253,6 +1334,12 @@ class UltimateLargeFileViewer(ctk.CTk):
 
             self.search_panel_visible = True
             self.entry_search.focus()
+
+    def _force_close_search_panel(self):
+        if self.search_panel_visible:
+            self.search_panel_frame.pack_forget()
+            self.main_container.pack_configure(padx=0)
+            self.search_panel_visible = False
 
     def start_search_thread(self):
         if not self.file_path or self.is_indexing or self.is_searching:
@@ -1288,11 +1375,15 @@ class UltimateLargeFileViewer(ctk.CTk):
         t.start()
 
     def search_keyword_worker(self, keyword, use_regex):
+        import bisect
+
         matches = []
         line_indices = []
         total_found = 0
         enc = self._get_selected_encoding()
-        mm = self.mmap_obj
+
+        with self.mmap_lock:
+            mm = self.mmap_obj
 
         if mm is None or self.total_lines == 0:
             self.is_searching = False
@@ -1320,15 +1411,22 @@ class UltimateLargeFileViewer(ctk.CTk):
 
             k_bytes = keyword.encode(enc, errors="ignore")
             matched_offsets = []
-            file_size = mm.size()
+
+            with self.mmap_lock:
+                if self.mmap_obj is None:
+                    file_size = 0
+                else:
+                    file_size = self.mmap_obj.size()
 
             if use_regex:
                 try:
                     pattern_re = re.compile(k_bytes, re.MULTILINE)
-                    for m in pattern_re.finditer(mm):
-                        matched_offsets.append(m.start())
-                        if len(matched_offsets) >= 2000:
-                            break
+                    with self.mmap_lock:
+                        if self.mmap_obj is not None:
+                            for m in pattern_re.finditer(self.mmap_obj):
+                                matched_offsets.append(m.start())
+                                if len(matched_offsets) >= 2000:
+                                    break
                 except re.error:
                     if self.winfo_exists():
                         self.after(
@@ -1338,15 +1436,24 @@ class UltimateLargeFileViewer(ctk.CTk):
                                 "올바르지 않은 정규식 패턴입니다.",
                             ),
                         )
-                    self.after(0, lambda: self.btn_search.configure(state="normal"))
+                        self.after(
+                            0,
+                            lambda: self.lbl_search_status.configure(
+                                text="정규식 오류",
+                                text_color=self.COLOR_ERROR[self.theme_var.get()],
+                            ),
+                        )
+                        self.after(0, lambda: self.btn_search.configure(state="normal"))
                     self.is_searching = False
                     return
             else:
                 search_pos = 0
                 while search_pos < file_size:
-                    if self.mmap_obj is None:
-                        break
-                    pos = mm.find(k_bytes, search_pos)
+                    with self.mmap_lock:
+                        if self.mmap_obj is None:
+                            break
+                        pos = self.mmap_obj.find(k_bytes, search_pos)
+
                     if pos == -1:
                         break
                     matched_offsets.append(pos)
@@ -1482,14 +1589,16 @@ class UltimateLargeFileViewer(ctk.CTk):
         if not file_selected:
             file_selected = filedialog.askopenfilename(
                 title="대용량 텍스트 파일 선택",
-                filetypes=[("All files", "*.*"), ("Text/Log files", "*.txt;*.log;*.csv;*.json;*.tsv")],
+                filetypes=[
+                    ("All files", "*.*"),
+                    ("Text/Log files", "*.txt;*.log;*.csv;*.json;*.tsv"),
+                ],
             )
         if not file_selected or not os.path.exists(file_selected):
             return
 
         self.tab_panel_frame.pack_forget()
-        if self.search_panel_visible:
-            self._force_close_search_panel()
+        self._force_close_search_panel()
 
         self._close_mmap()
         self.file_path = file_selected
@@ -1523,6 +1632,8 @@ class UltimateLargeFileViewer(ctk.CTk):
         t.start()
 
     def index_file_worker(self):
+        import mmap
+
         mode = self.theme_var.get()
         try:
             file_size = os.path.getsize(self.file_path)
@@ -1558,28 +1669,40 @@ class UltimateLargeFileViewer(ctk.CTk):
                             self.file_path, rust_progress_callback
                         )
 
-                    self.file_handle = open(self.file_path, "rb")
-                    self.mmap_obj = mmap.mmap(self.file_handle.fileno(), 0, access=mmap.ACCESS_READ)
+                    with self.mmap_lock:
+                        self.file_handle = open(self.file_path, "rb")
+                        self.mmap_obj = mmap.mmap(
+                            self.file_handle.fileno(), 0, access=mmap.ACCESS_READ
+                        )
 
                     if self.winfo_exists():
                         self.after(0, self.on_indexing_complete)
                     return
                 except Exception as rust_err:
                     print(f"[디버그] Rust 인덱싱 코어 예외 발생, 파이썬 모드로 전환: {rust_err}")
+                    with self.mmap_lock:
+                        if self.file_handle is not None:
+                            try:
+                                self.file_handle.close()
+                            except Exception:
+                                pass
+                            self.file_handle = None
 
             self.current_engine_used_rust = False
             self.line_offsets = [0]
-            self.file_handle = open(self.file_path, "rb")
-            self.mmap_obj = mmap.mmap(self.file_handle.fileno(), 0, access=mmap.ACCESS_READ)
-            mm = self.mmap_obj
+            with self.mmap_lock:
+                self.file_handle = open(self.file_path, "rb")
+                self.mmap_obj = mmap.mmap(self.file_handle.fileno(), 0, access=mmap.ACCESS_READ)
+                mm = self.mmap_obj
 
             initial_shown = False
             file_pos = 0
             while True:
-                if self.mmap_obj is None:
-                    break
+                with self.mmap_lock:
+                    if self.mmap_obj is None:
+                        break
+                    idx = mm.find(b"\n", file_pos)
 
-                idx = mm.find(b"\n", file_pos)
                 if idx == -1:
                     break
 
@@ -1675,16 +1798,14 @@ class UltimateLargeFileViewer(ctk.CTk):
         self.btn_close.pack_forget()
         self.combo_encoding.configure(state="normal")
         self.tab_panel_frame.pack_forget()
-        if self.search_panel_visible:
-            self._force_close_search_panel()
+        self._force_close_search_panel()
 
     def close_file(self):
         if self.is_indexing or self.is_searching or self.is_splitting or self.is_merging:
             messagebox.showwarning("경고", "작업이 진행 중일 때는 파일을 닫을 수 없습니다.")
             return
 
-        if self.search_panel_visible:
-            self._force_close_search_panel()
+        self._force_close_search_panel()
 
         self._close_mmap()
         self.file_path = ""
@@ -1716,37 +1837,72 @@ class UltimateLargeFileViewer(ctk.CTk):
         line_height = self.current_font_size + 8 + 4
         widget_height = self.text_area.winfo_height()
         if widget_height > 20:
-            self.max_visible_lines = (widget_height // line_height) + 1
+            self.max_visible_lines = max(1, (widget_height // line_height) + 1)
             if self.file_path and self.total_lines > 0:
                 self.render_view(self.current_start_line)
                 self.set_scroll_bar_position(self.current_start_line)
 
+    def _get_line_bytes(self, idx):
+        """[지연 로딩 용] mmap에서 특정 라인의 raw 바이너리를 지연 획득"""
+        with self.mmap_lock:
+            mm = self.mmap_obj
+            if mm is None or idx < 0 or idx >= self.total_lines:
+                return b""
+            try:
+                file_size = mm.size()
+                if self.current_engine_used_rust and self.rust_core is not None:
+                    with self.rust_lock:
+                        offsets = self.rust_core.get_offsets_range(idx, 2)
+                        if len(offsets) < 2:
+                            start_offset = offsets[0] if len(offsets) == 1 else 0
+                            end_offset = file_size
+                        else:
+                            start_offset, end_offset = offsets[0], offsets[1]
+                else:
+                    start_offset = self.line_offsets[idx]
+                    end_offset = (
+                        self.line_offsets[idx + 1]
+                        if (idx + 1) < len(self.line_offsets)
+                        else file_size
+                    )
+                return mm[start_offset:end_offset]
+            except Exception:
+                return b""
+
     def _load_prefetch_buffer(self, fetch_start, fetch_count, enc):
-        """[Prefetching] 앞뒤 구간 블록을 미리 읽어 인메모리 버퍼에 저장"""
-        mm = self.mmap_obj
-        if mm is None:
-            return
+        """[지연 로딩 / Prefetching] 시각 영역 주변 블록을 필요한 시점에만 디코딩하여 메모리에 캐시"""
+        with self.mmap_lock:
+            mm = self.mmap_obj
+            if mm is None:
+                return
 
-        file_size = mm.size()
-        if self.current_engine_used_rust and self.rust_core is not None:
-            with self.rust_lock:
-                offsets = self.rust_core.get_offsets_range(fetch_start, fetch_count + 1)
-        else:
-            offsets = self.line_offsets[fetch_start : fetch_start + fetch_count + 1]
+            try:
+                fetch_start = max(0, min(fetch_start, self.total_lines - 1))
+                fetch_count = min(fetch_count, self.total_lines - fetch_start)
 
-        self.prefetch_buffer.clear()
-        for i in range(len(offsets) - 1):
-            idx = fetch_start + i
-            start_offset = offsets[i]
-            end_offset = offsets[i + 1] if (i + 1) < len(offsets) else file_size
-            line_bytes = mm[start_offset:end_offset]
-            self.prefetch_buffer[idx] = line_bytes.decode(enc, errors="ignore")
+                file_size = mm.size()
+                if self.current_engine_used_rust and self.rust_core is not None:
+                    with self.rust_lock:
+                        offsets = self.rust_core.get_offsets_range(fetch_start, fetch_count + 1)
+                else:
+                    offsets = self.line_offsets[fetch_start : fetch_start + fetch_count + 1]
 
-        self.prefetch_range = (fetch_start, fetch_start + len(offsets) - 1)
+                self.prefetch_buffer.clear()
+                for i in range(len(offsets) - 1):
+                    idx = fetch_start + i
+                    start_offset = offsets[i]
+                    end_offset = offsets[i + 1] if (i + 1) < len(offsets) else file_size
+                    line_bytes = mm[start_offset:end_offset]
+                    self.prefetch_buffer[idx] = line_bytes.decode(enc, errors="ignore")
+
+                self.prefetch_range = (fetch_start, fetch_start + len(offsets) - 1)
+            except Exception as e:
+                print(f"Prefetch buffer error: {e}")
 
     def render_view(self, start_line, highlight_keyword=None, use_regex=False, highlight_line=None):
-        if not self.file_path or self.total_lines == 0 or self.mmap_obj is None:
-            return
+        with self.mmap_lock:
+            if not self.file_path or self.total_lines == 0 or self.mmap_obj is None:
+                return
 
         if self.is_indexing or self.is_selecting:
             return
@@ -1783,7 +1939,11 @@ class UltimateLargeFileViewer(ctk.CTk):
 
             text_parts = []
             for idx in range(start_line, end_line):
-                decoded_line = self.prefetch_buffer.get(idx, "")
+                decoded_line = self.prefetch_buffer.get(idx)
+                if decoded_line is None:
+                    # 버퍼 미스 시 지연 디코딩(Lazy decoding) 수행
+                    raw_bytes = self._get_line_bytes(idx)
+                    decoded_line = raw_bytes.decode(enc, errors="ignore")
                 text_parts.append(f"{idx + 1:>7} | {decoded_line}")
 
             full_text = "".join(text_parts)
@@ -1933,6 +2093,9 @@ class UltimateLargeFileViewer(ctk.CTk):
             self.prog_win.destroy()
 
     def split_file_worker(self, size_mb, save_dir):
+        import bisect
+        import time
+
         target_chunk_bytes = int(size_mb * 1024 * 1024)
         file_total_size = os.path.getsize(self.file_path)
 
@@ -1959,21 +2122,22 @@ class UltimateLargeFileViewer(ctk.CTk):
                 last_ui_update_time = time.time()
 
                 while current_offset < file_total_size:
-                    if self.mmap_obj is None:
-                        break
-
                     target_end_offset = current_offset + target_chunk_bytes
 
                     if target_end_offset >= file_total_size:
                         actual_end_offset = file_total_size
                     else:
                         if self.current_engine_used_rust and self.rust_core is not None:
-                            mm = self.mmap_obj
-                            nl_pos = mm.find(b"\n", target_end_offset)
-                            if nl_pos != -1:
-                                actual_end_offset = nl_pos + 1
-                            else:
-                                actual_end_offset = file_total_size
+                            with self.mmap_lock:
+                                mm = self.mmap_obj
+                                if mm is not None:
+                                    nl_pos = mm.find(b"\n", target_end_offset)
+                                    if nl_pos != -1:
+                                        actual_end_offset = nl_pos + 1
+                                    else:
+                                        actual_end_offset = file_total_size
+                                else:
+                                    actual_end_offset = file_total_size
                         else:
                             idx = bisect.bisect_right(self.line_offsets, target_end_offset)
                             if idx < len(self.line_offsets):
@@ -2110,6 +2274,10 @@ class UltimateLargeFileViewer(ctk.CTk):
         def run_merge():
             mode = self.theme_var.get()
             dialog.destroy()
+
+            if self.file_path in files_selected:
+                self._close_mmap()
+
             self.is_merging = True
             self.lbl_file.configure(
                 text="여러 텍스트 파일 병합 진행 중...", text_color=self.COLOR_WARNING[mode]
@@ -2133,13 +2301,10 @@ class UltimateLargeFileViewer(ctk.CTk):
         ).pack(pady=10)
 
     def merge_files_worker(self, src_files, dst_file):
+        import time
+
         success_flag = False
         total_files = len(src_files)
-
-        if self.file_path in src_files:
-            if self.winfo_exists():
-                self.after(0, self._close_mmap)
-                time.sleep(0.1)
 
         valid_files = [f for f in src_files if os.path.exists(f)]
         try:
@@ -2219,7 +2384,7 @@ class UltimateLargeFileViewer(ctk.CTk):
         finally:
             if self.winfo_exists():
                 self.after(0, self._close_progress_ui)
-                self.after(0, lambda: self._on_merge_complete(success_flag))
+                self.after(0, lambda sf=success_flag: self._on_merge_complete(sf))
 
     def _on_merge_complete(self, success):
         self.is_merging = False
@@ -2273,9 +2438,10 @@ class UltimateLargeFileViewer(ctk.CTk):
             for line in selected_text.splitlines():
                 if "|" in line:
                     _, raw_data = line.split("|", 1)
-                    cleaned_lines.append(raw_data.strip())
+                    raw_data = raw_data.removeprefix(" ")
+                    cleaned_lines.append(raw_data)
                 else:
-                    cleaned_lines.append(line.strip())
+                    cleaned_lines.append(line)
 
             processed_text = "\n".join(cleaned_lines)
 
@@ -2299,12 +2465,13 @@ class UltimateLargeFileViewer(ctk.CTk):
                 )
                 return "break"
 
-            mm = self.mmap_obj
-            if mm is None:
-                return "break"
+            with self.mmap_lock:
+                mm = self.mmap_obj
+                if mm is None:
+                    return "break"
+                file_size = mm.size()
 
             enc = self._get_selected_encoding()
-            file_size = mm.size()
 
             if self.current_engine_used_rust and self.rust_core is not None:
                 with self.rust_lock:
@@ -2313,12 +2480,15 @@ class UltimateLargeFileViewer(ctk.CTk):
                 offsets = self.line_offsets[sel_start : sel_start + line_count + 1]
 
             lines = []
-            for i in range(len(offsets) - 1):
-                start_offset = offsets[i]
-                end_offset = offsets[i + 1] if (i + 1) < len(offsets) else file_size
-                line_bytes = mm[start_offset:end_offset]
-                decoded = line_bytes.decode(enc, errors="ignore").rstrip("\n").rstrip("\r")
-                lines.append(decoded)
+            with self.mmap_lock:
+                if self.mmap_obj is None:
+                    return "break"
+                for i in range(len(offsets) - 1):
+                    start_offset = offsets[i]
+                    end_offset = offsets[i + 1] if (i + 1) < len(offsets) else file_size
+                    line_bytes = self.mmap_obj[start_offset:end_offset]
+                    decoded = line_bytes.decode(enc, errors="ignore").rstrip("\n").rstrip("\r")
+                    lines.append(decoded)
 
             text = "\n".join(lines)
 
@@ -2408,7 +2578,7 @@ def _is_instance_running():
         sock.connect(("127.0.0.1", SINGLE_INSTANCE_PORT))
         sock.close()
         return True
-    except (socket.error, ConnectionRefusedError, TimeoutError):
+    except (OSError, ConnectionRefusedError, TimeoutError):
         return False
 
 
@@ -2426,13 +2596,14 @@ def _send_file_path_to_existing_instance(file_path):
 
 def _start_ipc_server(app):
     """메인 인스턴스용 IPC 백그라운드 서버를 시작합니다."""
+
     def server_thread():
         server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         try:
             server_socket.bind(("127.0.0.1", SINGLE_INSTANCE_PORT))
             server_socket.listen(5)
-            
+
             with open(LOCK_FILE_PATH, "w") as f:
                 f.write(str(os.getpid()))
 
@@ -2443,7 +2614,10 @@ def _start_ipc_server(app):
                     received_msg = data.decode("utf-8").strip()
                     if received_msg and received_msg != "__FOCUS__":
                         if os.path.exists(received_msg):
-                            app.after(0, lambda path=received_msg: app.start_open_file_thread(path))
+                            app.after(
+                                0,
+                                lambda path=received_msg: app.start_open_file_thread(path),
+                            )
                     app.after(0, lambda: (app.deiconify(), app.focus_force(), app.lift()))
                 conn.close()
         except Exception as e:
@@ -2469,7 +2643,7 @@ if __name__ == "__main__":
     else:
         app = UltimateLargeFileViewer(initial_file_path=passed_file_path)
         _start_ipc_server(app)
-        
+
         try:
             app.mainloop()
         finally:
