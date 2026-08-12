@@ -5,7 +5,8 @@ use rayon::prelude::*;
 use regex::bytes::RegexBuilder;
 use std::fs::File;
 use std::path::Path;
-use std::sync::{Arc, Mutex};
+use std::sync::atomic::{AtomicI32, AtomicUsize, Ordering};
+use std::sync::Arc;
 
 #[pyclass]
 struct FileIndexCore {
@@ -44,64 +45,75 @@ impl FileIndexCore {
 
         if self.file_size == 0 {
             self.line_offsets = vec![0];
-            return Ok(0);
+            return Ok(1);
         }
 
-        let chunk_size = 64 * 1024 * 1024;
         let file_size = self.file_size;
+        let chunk_size = 32 * 1024 * 1024; // 32MB
 
-        let estimated_lines = (file_size / 80).max(1024);
-        let offsets_arc = Arc::new(Mutex::new(Vec::with_capacity(estimated_lines)));
-        {
-            let mut guard = offsets_arc.lock().unwrap();
-            guard.push(0u64);
-        }
+        let (line_offsets, _) = py.allow_threads(|| {
+            let num_chunks = (file_size + chunk_size - 1) / chunk_size;
+            let total_processed = Arc::new(AtomicUsize::new(0));
+            let last_reported_pct = Arc::new(AtomicI32::new(-1));
 
-        let last_reported_pct = Arc::new(Mutex::new(-1i32));
+            let mut chunks_offsets: Vec<Vec<u64>> = (0..num_chunks)
+                .into_par_iter()
+                .map(|i| {
+                    let start = i * chunk_size;
+                    let end = std::cmp::min(start + chunk_size, file_size);
+                    let sub_slice = &mmap[start..end];
 
-        py.allow_threads(|| {
-            let mut current_pos = 0;
-            while current_pos < file_size {
-                let end_pos = std::cmp::min(current_pos + chunk_size, file_size);
-                let sub_slice = &mmap[current_pos..end_pos];
-
-                let mut local_offsets = Vec::with_capacity(65536);
-                for pos in memchr_iter(b'\n', sub_slice) {
-                    local_offsets.push((current_pos + pos + 1) as u64);
-                }
-
-                let current_len = {
-                    let mut guard = offsets_arc.lock().unwrap();
-                    guard.extend_from_slice(&local_offsets);
-                    guard.len()
-                };
-
-                if let Some(ref callback) = progress_callback {
-                    let pct = ((end_pos as f64 / file_size as f64) * 100.0) as i32;
-                    let mut last_pct = last_reported_pct.lock().unwrap();
-                    if pct > *last_pct {
-                        *last_pct = pct;
-                        Python::with_gil(|py_callback| {
-                            let _ = callback.call1(py_callback, (pct, current_len));
-                        });
+                    let mut local_offsets = Vec::with_capacity(sub_slice.len() / 80 + 1024);
+                    for pos in memchr_iter(b'\n', sub_slice) {
+                        local_offsets.push((start + pos + 1) as u64);
                     }
-                }
-                current_pos = end_pos;
+
+                    if let Some(ref callback) = progress_callback {
+                        let processed = total_processed.fetch_add(end - start, Ordering::Relaxed) + (end - start);
+                        let pct = ((processed as f64 / file_size as f64) * 100.0) as i32;
+
+                        let mut current_pct = last_reported_pct.load(Ordering::Relaxed);
+                        while pct > current_pct {
+                            match last_reported_pct.compare_exchange_weak(
+                                current_pct,
+                                pct,
+                                Ordering::Relaxed,
+                                Ordering::Relaxed,
+                            ) {
+                                Ok(_) => {
+                                    Python::with_gil(|py_callback| {
+                                        let _ = callback.call1(py_callback, (pct, 0));
+                                    });
+                                    break;
+                                }
+                                Err(actual) => current_pct = actual,
+                            }
+                        }
+                    }
+
+                    local_offsets
+                })
+                .collect();
+
+            // sum::<usize>() 터보피시로 타입 추론 에러(E0283) 수정
+            let total_lines: usize = chunks_offsets.iter().map(|c| c.len()).sum::<usize>() + 1;
+            let mut final_offsets = Vec::with_capacity(total_lines);
+            final_offsets.push(0u64);
+
+            for mut offsets in chunks_offsets.drain(..) {
+                final_offsets.append(&mut offsets);
             }
+
+            if let Some(&last) = final_offsets.last() {
+                if last >= file_size as u64 {
+                    final_offsets.pop();
+                }
+            }
+
+            (final_offsets, total_lines)
         });
 
-        let mut final_offsets = match Arc::try_unwrap(offsets_arc) {
-            Ok(mutex) => mutex.into_inner().unwrap(),
-            Err(arc) => arc.lock().unwrap().clone(),
-        };
-
-        if let Some(&last) = final_offsets.last() {
-            if last > file_size as u64 {
-                final_offsets.pop();
-            }
-        }
-
-        self.line_offsets = final_offsets;
+        self.line_offsets = line_offsets;
         Ok(self.line_offsets.len())
     }
 
@@ -121,15 +133,15 @@ impl FileIndexCore {
         pattern: Vec<u8>,
         use_regex: bool,
     ) -> PyResult<(Vec<String>, Vec<usize>, usize)> {
-        if pattern.is_empty() || self.mmap.is_none() {
+        if pattern.is_empty() || self.mmap.is_none() || self.line_offsets.is_empty() {
             return Ok((vec![], vec![], 0));
         }
 
         let mmap = self.mmap.as_ref().unwrap().clone();
         let line_offsets = &self.line_offsets;
 
-        let results: Vec<Vec<usize>> = py.allow_threads(|| {
-            let chunk_size = 32 * 1024 * 1024;
+        let results: Result<Vec<Vec<usize>>, pyo3::PyErr> = py.allow_threads(|| {
+            let chunk_size = 16 * 1024 * 1024; // 16MB
             let file_len = mmap.len();
 
             let chunks: Vec<(usize, usize)> = (0..file_len)
@@ -141,49 +153,30 @@ impl FileIndexCore {
                 .collect();
 
             if use_regex {
-                let pattern_str = match std::str::from_utf8(&pattern) {
-                    Ok(s) => s,
-                    Err(_) => {
-                        return Err(pyo3::exceptions::PyValueError::new_err(
-                            "Invalid UTF-8 regex pattern",
-                        ))
-                    }
-                };
+                let pattern_str = std::str::from_utf8(&pattern).map_err(|_| {
+                    pyo3::exceptions::PyValueError::new_err("Invalid UTF-8 regex pattern")
+                })?;
 
-                let re = match RegexBuilder::new(pattern_str).multi_line(true).build() {
-                    Ok(r) => r,
-                    Err(e) => {
-                        return Err(pyo3::exceptions::PyValueError::new_err(format!(
-                            "Regex syntax error: {}",
-                            e
-                        )))
-                    }
-                };
+                let re = RegexBuilder::new(pattern_str)
+                    .multi_line(true)
+                    .build()
+                    .map_err(|e| {
+                        pyo3::exceptions::PyValueError::new_err(format!("Regex syntax error: {}", e))
+                    })?;
 
-                let local_results: Result<Vec<Vec<usize>>, pyo3::PyErr> = chunks
+                Ok(chunks
                     .into_par_iter()
                     .map(|(c_start, c_end)| {
                         let sub_slice = &mmap[c_start..c_end];
                         let mut local_indices = Vec::new();
                         let mut last_line_idx = None;
 
-                        let start_line_idx = match line_offsets.binary_search(&(c_start as u64)) {
-                            Ok(idx) => idx,
-                            Err(idx) => idx.saturating_sub(1),
-                        };
-                        let end_line_idx = match line_offsets.binary_search(&(c_end as u64)) {
-                            Ok(idx) => idx,
-                            Err(idx) => idx,
-                        };
-                        let local_slice = &line_offsets[start_line_idx..std::cmp::min(end_line_idx + 1, line_offsets.len())];
-
                         for m in re.find_iter(sub_slice) {
-                            let abs_offset = c_start + m.start();
-                            let local_idx = match local_slice.binary_search(&(abs_offset as u64)) {
+                            let abs_offset = (c_start + m.start()) as u64;
+                            let line_idx = match line_offsets.binary_search(&abs_offset) {
                                 Ok(idx) => idx,
                                 Err(idx) => idx.saturating_sub(1),
                             };
-                            let line_idx = start_line_idx + local_idx;
 
                             if Some(line_idx) != last_line_idx {
                                 local_indices.push(line_idx);
@@ -193,42 +186,26 @@ impl FileIndexCore {
                                 }
                             }
                         }
-                        Ok(local_indices)
+                        local_indices
                     })
-                    .collect();
-
-                local_results
+                    .collect())
             } else {
-                let local_results: Result<Vec<Vec<usize>>, pyo3::PyErr> = chunks
+                let finder = memmem::Finder::new(&pattern);
+
+                Ok(chunks
                     .into_par_iter()
                     .map(|(c_start, c_end)| {
-                        let search_end = std::cmp::min(c_end + pattern.len(), file_len);
+                        let search_end = std::cmp::min(c_end + pattern.len() - 1, file_len);
                         let sub_slice = &mmap[c_start..search_end];
                         let mut local_indices = Vec::new();
                         let mut last_line_idx = None;
 
-                        if !sub_slice.contains(&pattern[0]) {
-                            return Ok(local_indices);
-                        }
-
-                        let start_line_idx = match line_offsets.binary_search(&(c_start as u64)) {
-                            Ok(idx) => idx,
-                            Err(idx) => idx.saturating_sub(1),
-                        };
-                        let end_line_idx = match line_offsets.binary_search(&(search_end as u64)) {
-                            Ok(idx) => idx,
-                            Err(idx) => idx,
-                        };
-                        let local_slice = &line_offsets[start_line_idx..std::cmp::min(end_line_idx + 1, line_offsets.len())];
-
-                        let finder = memmem::Finder::new(&pattern);
                         for pos in finder.find_iter(sub_slice) {
-                            let abs_offset = c_start + pos;
-                            let local_idx = match local_slice.binary_search(&(abs_offset as u64)) {
+                            let abs_offset = (c_start + pos) as u64;
+                            let line_idx = match line_offsets.binary_search(&abs_offset) {
                                 Ok(idx) => idx,
                                 Err(idx) => idx.saturating_sub(1),
                             };
-                            let line_idx = start_line_idx + local_idx;
 
                             if Some(line_idx) != last_line_idx {
                                 local_indices.push(line_idx);
@@ -238,18 +215,17 @@ impl FileIndexCore {
                                 }
                             }
                         }
-                        Ok(local_indices)
+                        local_indices
                     })
-                    .collect();
-
-                local_results
+                    .collect())
             }
-        })?;
+        });
 
         let mut final_indices = Vec::new();
-        for mut chunk_res in results {
+        for mut chunk_res in results? {
             final_indices.append(&mut chunk_res);
         }
+
         final_indices.sort_unstable();
         final_indices.dedup();
 
