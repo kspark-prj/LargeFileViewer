@@ -11,17 +11,17 @@
 ## 📋 전체 빌드 흐름 한눈에 보기
 
 ```
-① Git 클론 → ② Python 환경 구성 → ③ Python 의존성 설치
-                                          ↓
+① Git 클론 → ② uv 설치 → ③ uv sync (의존성 자동 설치)
+                                  ↓
                     ┌─────────────────────────────────────────┐
                     │  ④ (선택) Rust 코어 빌드 — 고속 모드    │
                     │    C++ 빌드 도구 설치                    │
                     │    Rust 툴체인 설치                      │
-                    │    maturin으로 코어 컴파일               │
+                    │    uv sync로 코어 자동 컴파일            │
                     └─────────────────────────────────────────┘
-                                          ↓
-              ⑤ 프로그램 실행 (python Hawkeye.py)
-                                          ↓
+                                  ↓
+              ⑤ 프로그램 실행 (uv run python Hawkeye.py)
+                                  ↓
                     ┌─────────────────────────────────────────┐
                     │  ⑥ (선택) 실행 파일 패키징 (.exe / ELF) │
                     └─────────────────────────────────────────┘
@@ -38,29 +38,30 @@ git clone https://github.com/kspark-prj/largeFileViewer.git
 cd largeFileViewer
 ```
 
-### ② Python 환경 구성
+### ② uv 설치
 
-Python **3.8 이상**이 필요합니다. 가상 환경 사용을 권장합니다.
-
-```powershell
-# Python 버전 확인
-python --version
-
-# (권장) 가상 환경 생성 및 활성화
-python -m venv venv
-.\venv\Scripts\Activate.ps1
-```
-
-> **⚠️ PowerShell 실행 정책 오류 시**
-> `Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser` 실행 후 다시 시도하세요.
-
-### ③ Python 의존성 설치
+[uv](https://docs.astral.sh/uv/)는 빠르고 현대적인 Python 패키지 매니저입니다.
 
 ```powershell
-pip install -r requirements.txt
+# Windows에서 uv 설치
+powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
 ```
 
-이 단계에서 설치되는 패키지:
+> **💡 이미 uv가 설치되어 있다면** 이 단계를 건너뛰세요.
+> `uv --version`으로 설치 여부를 확인할 수 있습니다.
+
+### ③ 의존성 설치
+
+```powershell
+uv sync
+```
+
+이 명령 하나로 다음이 자동으로 수행됩니다:
+- Python 인터프리터 자동 감지 (또는 설치)
+- 가상 환경(`.venv`) 자동 생성
+- `pyproject.toml`에 정의된 모든 Python 의존성 설치
+- `large_file_core` (Rust 코어)가 빌드 가능한 환경이면 자동 컴파일
+
 | 패키지 | 용도 |
 |--------|------|
 | `customtkinter` | 모던 다크 테마 GUI 프레임워크 |
@@ -103,19 +104,26 @@ cargo --version    # 예: cargo 1.xx.x
 #### 4-3. Rust 코어 컴파일 및 설치
 
 ```powershell
-# maturin(Rust↔Python 빌드 도구)이 자동으로 설치되며 컴파일을 수행합니다
-pip install ./large_file_core
+# uv sync가 Rust 코어를 자동으로 감지하여 빌드합니다
+uv sync
 ```
 
 이 명령이 수행하는 작업:
 
-1. `pyproject.toml`을 읽고 빌드 백엔드로 **maturin**을 자동 설치
+1. `large_file_core/pyproject.toml`을 읽고 빌드 백엔드로 **maturin**을 자동 설치
 2. `Cargo.toml`의 Rust 의존성(`memmap2`, `rayon`, `regex`, `pyo3`)을 다운로드
 3. `src/lib.rs` Rust 소스를 네이티브 코드로 컴파일
-4. 컴파일된 `.pyd` 확장 모듈을 현재 Python 환경에 설치
+4. 컴파일된 `.pyd` 확장 모듈을 가상 환경에 설치
 
 > **💡 Python 3.13+ 호환성**
 > 본 프로젝트는 최신 `pyo3 (v0.23.3+)` 및 `Bound` API로 설계되어 있어 Python 3.13 이상에서도 별도 환경 변수 없이 정상 빌드됩니다.
+
+> **💡 Rust 소스(`lib.rs`) 수정 후 재빌드**
+> `uv sync`는 이미 설치된 패키지를 스킵하므로, Rust 소스를 수정한 뒤에는 다음 명령으로 강제 재빌드하세요:
+>
+> ```powershell
+> uv sync --reinstall-package large-file-core
+> ```
 
 #### 4-4. Rust 가속 활성화 확인
 
@@ -127,7 +135,7 @@ pip install ./large_file_core
 ### ⑤ 프로그램 실행
 
 ```powershell
-python Hawkeye.py
+uv run python Hawkeye.py
 ```
 
 ### ⑥ (선택) 실행 파일(.exe) 패키징
@@ -136,7 +144,7 @@ Rust 코어 포함 여부와 관계없이 독립 실행형 `.exe`를 생성할 �
 
 ```powershell
 # Spec 파일을 이용한 빌드 (Rust 코어가 설치된 상태라면 자동으로 포함됨)
-pyinstaller --clean --noconfirm LargeFileViewer.spec
+uv run pyinstaller --clean --noconfirm LargeFileViewer.spec
 ```
 
 빌드 완료 후 **`dist/LargeFileViewer.exe`** 가 생성됩니다.
@@ -156,15 +164,18 @@ git clone https://github.com/kspark-prj/largeFileViewer.git
 cd largeFileViewer
 ```
 
-### ② 시스템 의존성 설치
+### ② 시스템 의존성 및 uv 설치
 
-GUI 프레임워크(Tkinter)와 컴파일 도구를 설치합니다.
+GUI 프레임워크(Tkinter)와 컴파일 도구를 설치하고, uv를 설치합니다.
 
 #### Debian / Ubuntu 계열
 
 ```bash
 sudo apt-get update
-sudo apt-get install -y build-essential python3-tk python3-dev python3-venv curl
+sudo apt-get install -y build-essential python3-tk python3-dev curl
+
+# uv 설치
+curl -LsSf https://astral.sh/uv/install.sh | sh
 ```
 
 #### RedHat / Fedora 계열
@@ -172,17 +183,15 @@ sudo apt-get install -y build-essential python3-tk python3-dev python3-venv curl
 ```bash
 sudo dnf groupinstall -y "Development Tools"
 sudo dnf install -y python3-tkinter python3-devel gcc curl
+
+# uv 설치
+curl -LsSf https://astral.sh/uv/install.sh | sh
 ```
 
-### ③ Python 환경 구성 및 의존성 설치
+### ③ 의존성 설치
 
 ```bash
-# (권장) 가상 환경 생성 및 활성화
-python3 -m venv venv
-source venv/bin/activate
-
-# Python 의존성 설치
-pip install -r requirements.txt
+uv sync
 ```
 
 ### ④ (선택) Rust 가속 코어 빌드
@@ -207,13 +216,13 @@ cargo --version
 #### 4-2. Rust 코어 컴파일 및 설치
 
 ```bash
-pip install ./large_file_core
+uv sync
 ```
 
 ### ⑤ 프로그램 실행
 
 ```bash
-python3 Hawkeye.py
+uv run python3 Hawkeye.py
 ```
 
 > **ℹ️ 참고:** GUI 환경(X11 / Wayland)이 활성화된 데스크톱 환경에서만 화면이 정상 로드됩니다.
@@ -223,7 +232,7 @@ python3 Hawkeye.py
 
 ```bash
 # 단일 바이너리 빌드
-pyinstaller -w -D --noupx --clean --icon=main.ico --collect-all large_file_core --collect-binaries large_file_core --collect-all customtkinter --exclude-module tkinter.test --exclude-module unittest --exclude-module pydoc --exclude-module email --exclude-module http --exclude-module xml --exclude-module html --exclude-module setuptools --exclude-module distutils --exclude-module pytest Hawkeye.py
+uv run pyinstaller -w -D --noupx --clean --icon=main.ico --collect-all large_file_core --collect-binaries large_file_core --collect-all customtkinter --exclude-module tkinter.test --exclude-module unittest --exclude-module pydoc --exclude-module email --exclude-module http --exclude-module xml --exclude-module html --exclude-module setuptools --exclude-module distutils --exclude-module pytest Hawkeye.py
 ```
 
 빌드 완료 후 **`dist/Hawkeye`** 경로에 실행 파일이 생성됩니다.
@@ -236,18 +245,18 @@ pyinstaller -w -D --noupx --clean --icon=main.ico --collect-all large_file_core 
 
 | 증상                                             | 원인                      | 해결 방법                                                                                 |
 | ------------------------------------------------ | ------------------------- | ----------------------------------------------------------------------------------------- |
-| `pip install ./large_file_core` 실패             | Rust 툴체인 미설치        | Rust 설치 후 **새 터미널**에서 재시도                                                     |
+| `uv sync` 시 Rust 코어 빌드 실패                | Rust 툴체인 미설치        | Rust 설치 후 **새 터미널**에서 재시도                                                     |
 | `cargo` 명령을 찾을 수 없음                      | PATH 미등록               | Windows: `$env:PATH += ";$env:USERPROFILE\.cargo\bin"` / Linux: `source $HOME/.cargo/env` |
 | `link.exe` 에러 (Windows)                        | C++ 빌드 도구 미설치      | Visual Studio C++ 빌드 도구 설치 후 재부팅                                                |
 | `error: linker 'cc' not found` (Linux)           | GCC 미설치                | `sudo apt install build-essential`                                                        |
-| PyInstaller exe에 Rust 코어가 빠짐               | 코어 미설치 상태에서 빌드 | `pip install ./large_file_core` 후 PyInstaller 재실행                                     |
+| PyInstaller exe에 Rust 코어가 빠짐               | 코어 미설치 상태에서 빌드 | `uv sync` 후 PyInstaller 재실행                                                          |
 | `ModuleNotFoundError: No module named 'tkinter'` | Tkinter 미설치 (Linux)    | `sudo apt install python3-tk`                                                             |
 
 ### 빌드 결과 확인
 
 ```powershell
 # Python에서 Rust 코어 설치 여부 확인
-python -c "import large_file_core; print('✅ Rust 코어 설치됨')"
+uv run python -c "import large_file_core; print('✅ Rust 코어 설치됨')"
 ```
 
 정상이면 `✅ Rust 코어 설치됨`이 출력됩니다.
@@ -261,8 +270,8 @@ python -c "import large_file_core; print('✅ Rust 코어 설치됨')"
 
 | 폴더                      | 내용                   | 크기    | 재생성 방법                     |
 | ------------------------- | ---------------------- | ------- | ------------------------------- |
-| `large_file_core/target/` | Rust 컴파일 캐시       | ~470 MB | `pip install ./large_file_core` |
-| `build/`                  | PyInstaller 중간 파일  | ~38 MB  | `pyinstaller` 재실행            |
-| `dist/`                   | 최종 실행 파일         | ~30 MB  | `pyinstaller` 재실행            |
+| `large_file_core/target/` | Rust 컴파일 캐시       | ~470 MB | `uv sync`                       |
+| `build/`                  | PyInstaller 중간 파일  | ~38 MB  | `uv run pyinstaller` 재실행     |
+| `dist/`                   | 최종 실행 파일         | ~30 MB  | `uv run pyinstaller` 재실행     |
 | `__pycache__/`            | Python 바이트코드 캐시 | ~0.1 MB | Python 실행 시 자동 생성        |
-| `venv/`                   | Python 가상 환경       | 다양    | `python -m venv venv`           |
+| `.venv/`                  | Python 가상 환경       | 다양    | `uv sync`                       |

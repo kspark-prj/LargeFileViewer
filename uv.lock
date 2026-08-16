@@ -1,0 +1,261 @@
+version = 1
+revision = 3
+requires-python = ">=3.8"
+resolution-markers = [
+    "python_full_version >= '3.10'",
+    "python_full_version == '3.9.*'",
+    "python_full_version < '3.9'",
+]
+
+[manifest]
+members = [
+    "large-file-core",
+    "large-file-viewer",
+]
+
+[[package]]
+name = "altgraph"
+version = "0.17.5"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/7e/f8/97fdf103f38fed6792a1601dbc16cc8aac56e7459a9fff08c812d8ae177a/altgraph-0.17.5.tar.gz", hash = "sha256:c87b395dd12fabde9c99573a9749d67da8d29ef9de0125c7f536699b4a9bc9e7", size = 48428, upload-time = "2025-11-21T20:35:50.583Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/a9/ba/000a1996d4308bc65120167c21241a3b205464a2e0b58deda26ae8ac21d1/altgraph-0.17.5-py2.py3-none-any.whl", hash = "sha256:f3a22400bce1b0c701683820ac4f3b159cd301acab067c51c653e06961600597", size = 21228, upload-time = "2025-11-21T20:35:49.444Z" },
+]
+
+[[package]]
+name = "customtkinter"
+version = "6.0.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "darkdetect" },
+    { name = "packaging", version = "26.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.9'" },
+    { name = "packaging", version = "26.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.9'" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/c4/36/aee6ed9171a5a232da66a8b257752bd03d25b487c9d67ba367ad159bd976/customtkinter-6.0.0.tar.gz", hash = "sha256:c782df167bc64ab3fc3140286df06967ac2de4dcc97dd5958426fe9c1a98057b", size = 267195, upload-time = "2026-06-24T20:14:32.144Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/b0/63/e2d3387432c5a94dec64031c86b5ba737216de7e7490abb55efd64dec054/customtkinter-6.0.0-py3-none-any.whl", hash = "sha256:704fcbf1d2fca06bd7881b0afacfae72aed9864c9b6de2870e632e55eb3a0456", size = 302166, upload-time = "2026-06-24T20:14:30.191Z" },
+]
+
+[[package]]
+name = "darkdetect"
+version = "0.8.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/45/77/7575be73bf12dee231d0c6e60ce7fb7a7be4fcd58823374fc59a6e48262e/darkdetect-0.8.0.tar.gz", hash = "sha256:b5428e1170263eb5dea44c25dc3895edd75e6f52300986353cd63533fe7df8b1", size = 7681, upload-time = "2022-12-16T14:14:42.113Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/f2/f2/728f041460f1b9739b85ee23b45fa5a505962ea11fd85bdbe2a02b021373/darkdetect-0.8.0-py3-none-any.whl", hash = "sha256:a7509ccf517eaad92b31c214f593dbcf138ea8a43b2935406bbd565e15527a85", size = 8955, upload-time = "2022-12-16T14:14:40.92Z" },
+]
+
+[[package]]
+name = "importlib-metadata"
+version = "8.5.0"
+source = { registry = "https://pypi.org/simple" }
+resolution-markers = [
+    "python_full_version < '3.9'",
+]
+dependencies = [
+    { name = "zipp", version = "3.20.2", source = { registry = "https://pypi.org/simple" } },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/cd/12/33e59336dca5be0c398a7482335911a33aa0e20776128f038019f1a95f1b/importlib_metadata-8.5.0.tar.gz", hash = "sha256:71522656f0abace1d072b9e5481a48f07c138e00f079c38c8f883823f9c26bd7", size = 55304, upload-time = "2024-09-11T14:56:08.937Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/a0/d9/a1e041c5e7caa9a05c925f4bdbdfb7f006d1f74996af53467bc394c97be7/importlib_metadata-8.5.0-py3-none-any.whl", hash = "sha256:45e54197d28b7a7f1559e60b95e7c567032b602131fbd588f1497f47880aa68b", size = 26514, upload-time = "2024-09-11T14:56:07.019Z" },
+]
+
+[[package]]
+name = "importlib-metadata"
+version = "8.7.1"
+source = { registry = "https://pypi.org/simple" }
+resolution-markers = [
+    "python_full_version == '3.9.*'",
+]
+dependencies = [
+    { name = "zipp", version = "3.23.1", source = { registry = "https://pypi.org/simple" } },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/f3/49/3b30cad09e7771a4982d9975a8cbf64f00d4a1ececb53297f1d9a7be1b10/importlib_metadata-8.7.1.tar.gz", hash = "sha256:49fef1ae6440c182052f407c8d34a68f72efc36db9ca90dc0113398f2fdde8bb", size = 57107, upload-time = "2025-12-21T10:00:19.278Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/fa/5e/f8e9a1d23b9c20a551a8a02ea3637b4642e22c2626e3a13a9a29cdea99eb/importlib_metadata-8.7.1-py3-none-any.whl", hash = "sha256:5a1f80bf1daa489495071efbb095d75a634cf28a8bc299581244063b53176151", size = 27865, upload-time = "2025-12-21T10:00:18.329Z" },
+]
+
+[[package]]
+name = "large-file-core"
+version = "0.1.0"
+source = { editable = "large_file_core" }
+
+[[package]]
+name = "large-file-viewer"
+version = "0.1.0"
+source = { virtual = "." }
+dependencies = [
+    { name = "customtkinter" },
+    { name = "large-file-core" },
+    { name = "pyinstaller" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "customtkinter", specifier = ">=5.2.0" },
+    { name = "large-file-core", editable = "large_file_core" },
+    { name = "pyinstaller", specifier = ">=6.0.0" },
+]
+
+[[package]]
+name = "macholib"
+version = "1.16.4"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "altgraph" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/10/2f/97589876ea967487978071c9042518d28b958d87b17dceb7cdc1d881f963/macholib-1.16.4.tar.gz", hash = "sha256:f408c93ab2e995cd2c46e34fe328b130404be143469e41bc366c807448979362", size = 59427, upload-time = "2025-11-22T08:28:38.373Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/c7/d1/a9f36f8ecdf0fb7c9b1e78c8d7af12b8c8754e74851ac7b94a8305540fc7/macholib-1.16.4-py2.py3-none-any.whl", hash = "sha256:da1a3fa8266e30f0ce7e97c6a54eefaae8edd1e5f86f3eb8b95457cae90265ea", size = 38117, upload-time = "2025-11-22T08:28:36.939Z" },
+]
+
+[[package]]
+name = "packaging"
+version = "26.2"
+source = { registry = "https://pypi.org/simple" }
+resolution-markers = [
+    "python_full_version < '3.9'",
+]
+sdist = { url = "https://files.pythonhosted.org/packages/d7/f1/e7a6dd94a8d4a5626c03e4e99c87f241ba9e350cd9e6d75123f992427270/packaging-26.2.tar.gz", hash = "sha256:ff452ff5a3e828ce110190feff1178bb1f2ea2281fa2075aadb987c2fb221661", size = 228134, upload-time = "2026-04-24T20:15:23.917Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/df/b2/87e62e8c3e2f4b32e5fe99e0b86d576da1312593b39f47d8ceef365e95ed/packaging-26.2-py3-none-any.whl", hash = "sha256:5fc45236b9446107ff2415ce77c807cee2862cb6fac22b8a73826d0693b0980e", size = 100195, upload-time = "2026-04-24T20:15:22.081Z" },
+]
+
+[[package]]
+name = "packaging"
+version = "26.3"
+source = { registry = "https://pypi.org/simple" }
+resolution-markers = [
+    "python_full_version >= '3.10'",
+    "python_full_version == '3.9.*'",
+]
+sdist = { url = "https://files.pythonhosted.org/packages/7d/fa/3944b40b07da9ce895c0e6303a5ab7d53da063554f534556b134a54d6093/packaging-26.3.tar.gz", hash = "sha256:94edc256424af38762eb31306eed28beb9f0efc50a8837492c9d6fd6004aed79", size = 313412, upload-time = "2026-08-04T18:15:28.737Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/63/34/ba1c580383c9eada3711951fef0795c80b829a078d72188184bcab9dd527/packaging-26.3-py3-none-any.whl", hash = "sha256:d7193f7c8e4e93f444fde0262bf90af30e16fa0ad0ad44cb553c87339b23cd1c", size = 129956, upload-time = "2026-08-04T18:15:27.159Z" },
+]
+
+[[package]]
+name = "pefile"
+version = "2024.8.26"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/03/4f/2750f7f6f025a1507cd3b7218691671eecfd0bbebebe8b39aa0fe1d360b8/pefile-2024.8.26.tar.gz", hash = "sha256:3ff6c5d8b43e8c37bb6e6dd5085658d658a7a0bdcd20b6a07b1fcfc1c4e9d632", size = 76008, upload-time = "2024-08-26T20:58:38.155Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/54/16/12b82f791c7f50ddec566873d5bdd245baa1491bac11d15ffb98aecc8f8b/pefile-2024.8.26-py3-none-any.whl", hash = "sha256:76f8b485dcd3b1bb8166f1128d395fa3d87af26360c2358fb75b80019b957c6f", size = 74766, upload-time = "2024-08-26T21:01:02.632Z" },
+]
+
+[[package]]
+name = "pyinstaller"
+version = "6.22.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "altgraph" },
+    { name = "importlib-metadata", version = "8.5.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.9'" },
+    { name = "importlib-metadata", version = "8.7.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version == '3.9.*'" },
+    { name = "macholib", marker = "sys_platform == 'darwin'" },
+    { name = "packaging", version = "26.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.9'" },
+    { name = "packaging", version = "26.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.9'" },
+    { name = "pefile", marker = "sys_platform == 'win32'" },
+    { name = "pyinstaller-hooks-contrib" },
+    { name = "pywin32-ctypes", marker = "sys_platform == 'win32'" },
+    { name = "setuptools", version = "75.3.4", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.9'" },
+    { name = "setuptools", version = "82.0.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version == '3.9.*'" },
+    { name = "setuptools", version = "84.0.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.10'" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/c3/28/11937d2d139139d5645cbaf905f7dcaa9c4929bd7b740ad9157af730fd39/pyinstaller-6.22.1.tar.gz", hash = "sha256:4e7ed495fccb9974d47cf72ef8cffc92afa05d60bc265c5585a68f3d229ca8d1", size = 4093778, upload-time = "2026-08-15T14:49:48.622Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/5b/51/82e66bc31b42f4ccb9bfb8a54c7b63e586a8f4668d1b5569c0ebf7810cf3/pyinstaller-6.22.1-py3-none-macosx_10_13_universal2.whl", hash = "sha256:d519a5549bf560407a9cffa8547f278e79c1093dc1cade6d9658c67b650d66c4", size = 1062734, upload-time = "2026-08-15T14:48:43.181Z" },
+    { url = "https://files.pythonhosted.org/packages/76/ef/7bcf8c48fbd413f5d83e618c376029625b1db5af8e60b198dedf17af6b9c/pyinstaller-6.22.1-py3-none-manylinux2014_aarch64.whl", hash = "sha256:0f257d6329d90def6b96f3ad9b601f4e10e549017d2ad09e730f4a9741b42138", size = 755696, upload-time = "2026-08-15T14:48:47.871Z" },
+    { url = "https://files.pythonhosted.org/packages/0d/92/3d425e8342b57ac0e856e5abba8d52a4c10227d8d364d342e9799a36a855/pyinstaller-6.22.1-py3-none-manylinux2014_i686.whl", hash = "sha256:1df884760a6efc4cc9bdcd48899f1382c072ab499bb16ed0b03606f8f10380c6", size = 768870, upload-time = "2026-08-15T14:48:52.391Z" },
+    { url = "https://files.pythonhosted.org/packages/a9/ab/49a3ad7987e68215f47acbb68352d519cb93934212d1f7d1d2f9ad49afe6/pyinstaller-6.22.1-py3-none-manylinux2014_ppc64le.whl", hash = "sha256:bc964609e73f32f79b4c967d1c29a05f913629fcf54b3752ec6ec82bf17cffdd", size = 767445, upload-time = "2026-08-15T14:48:56.481Z" },
+    { url = "https://files.pythonhosted.org/packages/3b/79/ecf886650e5caafd1958f07913bf23838a5188f9429599d125ac0e837fdc/pyinstaller-6.22.1-py3-none-manylinux2014_s390x.whl", hash = "sha256:3b654721a9fa13abdd8a3a8e266debf750a6f50115d17addc54e3269dc944e75", size = 762114, upload-time = "2026-08-15T14:49:00.881Z" },
+    { url = "https://files.pythonhosted.org/packages/3c/20/0efa9067556893788e59cfe077edbd0ef3af95d06ce020b42795697d9afc/pyinstaller-6.22.1-py3-none-manylinux2014_x86_64.whl", hash = "sha256:10d009ac9ddf17b57dbfe22a453363a02be4cb0d5bd8a119ba59ef530b936296", size = 762173, upload-time = "2026-08-15T14:49:05.014Z" },
+    { url = "https://files.pythonhosted.org/packages/54/0d/0490244f31101e671d75ef0499dcd079d6ea79a5242b1b33cca32606c16a/pyinstaller-6.22.1-py3-none-musllinux_1_1_aarch64.whl", hash = "sha256:ff3c51c1a3b793d1917f75d0f5f31ef8bd889c0accc8478d604bbcc363fcb74b", size = 761673, upload-time = "2026-08-15T14:49:09.022Z" },
+    { url = "https://files.pythonhosted.org/packages/a1/ec/f4ca5f2dd787a445d5b57010ad74a83acfd0fff9d6ef40984b05a995a28f/pyinstaller-6.22.1-py3-none-musllinux_1_1_x86_64.whl", hash = "sha256:bf5f4634b18add9381caa73bd1656a1f0736839aa41ca750fbd511116d5ae2ca", size = 761052, upload-time = "2026-08-15T14:49:13.084Z" },
+    { url = "https://files.pythonhosted.org/packages/f7/9e/b53c56c5ace1a5cf8f780067c9f10036cc7f184792e4661a06f68087538f/pyinstaller-6.22.1-py3-none-win32.whl", hash = "sha256:c5d7859b59c17f5c28973eb683e2236abb7a6eed1a7f354dc7f65ee3a7dff8ab", size = 1345562, upload-time = "2026-08-15T14:49:19.058Z" },
+    { url = "https://files.pythonhosted.org/packages/f1/77/894e6815f61022621661a32806ea6e41935ab6171df0408fc4502a9b772e/pyinstaller-6.22.1-py3-none-win_amd64.whl", hash = "sha256:9fe5d028023073b63c3e396e145c68a9c3382ab59889c749c4c248126d313945", size = 1406578, upload-time = "2026-08-15T14:49:25.54Z" },
+    { url = "https://files.pythonhosted.org/packages/79/d3/863ba7ee499664a367d5095b11d5565f8576b87ff873b81a85fc4eb95d2a/pyinstaller-6.22.1-py3-none-win_arm64.whl", hash = "sha256:bb7a405ef0fbea9b20b7312484d2766d2aa157026a0406a8e7ce63a573748eae", size = 1354948, upload-time = "2026-08-15T14:49:31.935Z" },
+]
+
+[[package]]
+name = "pyinstaller-hooks-contrib"
+version = "2026.6"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "importlib-metadata", version = "8.5.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.9'" },
+    { name = "importlib-metadata", version = "8.7.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version == '3.9.*'" },
+    { name = "packaging", version = "26.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.9'" },
+    { name = "packaging", version = "26.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.9'" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/94/5b/c9fe0db5e83ee1c39b2258fa21d23b15e1a60786b6c5990ee5074ead8bb6/pyinstaller_hooks_contrib-2026.6.tar.gz", hash = "sha256:bef5002c32f4f50bd55b005da12cff64eca8783e7eaf86a06a62410164bab725", size = 173354, upload-time = "2026-06-08T22:37:16.152Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/e7/31/f2d7343d8ed5f7c4678377886f6ce533e6eaaa131b252ce950114c2a7efa/pyinstaller_hooks_contrib-2026.6-py3-none-any.whl", hash = "sha256:fd13b8ac126b35361175edacd41a0d97080b75dd5f4b594ecefefff969509dd3", size = 457159, upload-time = "2026-06-08T22:37:14.722Z" },
+]
+
+[[package]]
+name = "pywin32-ctypes"
+version = "0.2.3"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/85/9f/01a1a99704853cb63f253eea009390c88e7131c67e66a0a02099a8c917cb/pywin32-ctypes-0.2.3.tar.gz", hash = "sha256:d162dc04946d704503b2edc4d55f3dba5c1d539ead017afa00142c38b9885755", size = 29471, upload-time = "2024-08-14T10:15:34.626Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/de/3d/8161f7711c017e01ac9f008dfddd9410dff3674334c233bde66e7ba65bbf/pywin32_ctypes-0.2.3-py3-none-any.whl", hash = "sha256:8a1513379d709975552d202d942d9837758905c8d01eb82b8bcc30918929e7b8", size = 30756, upload-time = "2024-08-14T10:15:33.187Z" },
+]
+
+[[package]]
+name = "setuptools"
+version = "75.3.4"
+source = { registry = "https://pypi.org/simple" }
+resolution-markers = [
+    "python_full_version < '3.9'",
+]
+sdist = { url = "https://files.pythonhosted.org/packages/0e/93/d2622cbf262418995140dfc1ddb890badd6322893fa122302577c82b9617/setuptools-75.3.4.tar.gz", hash = "sha256:b4ea3f76e1633c4d2d422a5d68ab35fd35402ad71e6acaa5d7e5956eb47e8887", size = 1354595, upload-time = "2026-02-08T14:12:34.287Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/cd/b1/961ba076c7d3732e3a97e6681c55ef647afb795fe8bfcd27becec8a762ce/setuptools-75.3.4-py3-none-any.whl", hash = "sha256:2dd50a7f42dddfa1d02a36f275dbe716f38ed250224f609d35fb60a09593d93e", size = 1251633, upload-time = "2026-02-08T14:12:32.364Z" },
+]
+
+[[package]]
+name = "setuptools"
+version = "82.0.1"
+source = { registry = "https://pypi.org/simple" }
+resolution-markers = [
+    "python_full_version == '3.9.*'",
+]
+sdist = { url = "https://files.pythonhosted.org/packages/4f/db/cfac1baf10650ab4d1c111714410d2fbb77ac5a616db26775db562c8fab2/setuptools-82.0.1.tar.gz", hash = "sha256:7d872682c5d01cfde07da7bccc7b65469d3dca203318515ada1de5eda35efbf9", size = 1152316, upload-time = "2026-03-09T12:47:17.221Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/9d/76/f789f7a86709c6b087c5a2f52f911838cad707cc613162401badc665acfe/setuptools-82.0.1-py3-none-any.whl", hash = "sha256:a59e362652f08dcd477c78bb6e7bd9d80a7995bc73ce773050228a348ce2e5bb", size = 1006223, upload-time = "2026-03-09T12:47:15.026Z" },
+]
+
+[[package]]
+name = "setuptools"
+version = "84.0.0"
+source = { registry = "https://pypi.org/simple" }
+resolution-markers = [
+    "python_full_version >= '3.10'",
+]
+sdist = { url = "https://files.pythonhosted.org/packages/6d/44/f5da03a8ef95d369145c5bb53050e7877c9f3d312e128605fd9504829143/setuptools-84.0.0.tar.gz", hash = "sha256:f4695c21257f0d9b537ec2692c941d02ee143b7cc1276941349a546573b2ef73", size = 1168449, upload-time = "2026-08-08T18:27:58.365Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/95/9c/c510029fc6ef33a6275cd2c5d3cecd6613dfd6aa401d57c54f1c18852ccf/setuptools-84.0.0-py3-none-any.whl", hash = "sha256:51a52592b3b99e102b609654876bd65f19f999935166d1352678931132b0c670", size = 818216, upload-time = "2026-08-08T18:27:56.719Z" },
+]
+
+[[package]]
+name = "zipp"
+version = "3.20.2"
+source = { registry = "https://pypi.org/simple" }
+resolution-markers = [
+    "python_full_version < '3.9'",
+]
+sdist = { url = "https://files.pythonhosted.org/packages/54/bf/5c0000c44ebc80123ecbdddba1f5dcd94a5ada602a9c225d84b5aaa55e86/zipp-3.20.2.tar.gz", hash = "sha256:bc9eb26f4506fda01b81bcde0ca78103b6e62f991b381fec825435c836edbc29", size = 24199, upload-time = "2024-09-13T13:44:16.101Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/62/8b/5ba542fa83c90e09eac972fc9baca7a88e7e7ca4b221a89251954019308b/zipp-3.20.2-py3-none-any.whl", hash = "sha256:a817ac80d6cf4b23bf7f2828b7cabf326f15a001bea8b1f9b49631780ba28350", size = 9200, upload-time = "2024-09-13T13:44:14.38Z" },
+]
+
+[[package]]
+name = "zipp"
+version = "3.23.1"
+source = { registry = "https://pypi.org/simple" }
+resolution-markers = [
+    "python_full_version == '3.9.*'",
+]
+sdist = { url = "https://files.pythonhosted.org/packages/30/21/093488dfc7cc8964ded15ab726fad40f25fd3d788fd741cc1c5a17d78ee8/zipp-3.23.1.tar.gz", hash = "sha256:32120e378d32cd9714ad503c1d024619063ec28aad2248dc6672ad13edfa5110", size = 25965, upload-time = "2026-04-13T23:21:46.6Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/08/8a/0861bec20485572fbddf3dfba2910e38fe249796cb73ecdeb74e07eeb8d3/zipp-3.23.1-py3-none-any.whl", hash = "sha256:0b3596c50a5c700c9cb40ba8d86d9f2cc4807e9bedb06bcdf7fac85633e444dc", size = 10378, upload-time = "2026-04-13T23:21:45.386Z" },
+]

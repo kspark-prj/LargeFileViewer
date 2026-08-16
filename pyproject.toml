@@ -1,0 +1,20 @@
+[project]
+name = "large-file-viewer"
+version = "0.1.0"
+description = "A viewer for very large files with Rust acceleration"
+readme = "README.md"
+requires-python = ">=3.8"
+dependencies = [
+    "customtkinter>=5.2.0",
+    "pyinstaller>=6.0.0",
+    "large_file_core",
+]
+
+[tool.uv]
+package = false
+
+[tool.uv.workspace]
+members = ["large_file_core"]
+
+[tool.uv.sources]
+large_file_core = { workspace = true }
