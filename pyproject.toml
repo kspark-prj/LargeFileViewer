@@ -18,3 +18,19 @@ members = ["large_file_core"]
 
 [tool.uv.sources]
 large_file_core = { workspace = true }
+
+[tool.ruff]
+target-version = "py313"
+
+[tool.ruff.lint]
+ignore = [
+    "F821",
+    "F841",
+    "DTZ007",
+    "DTZ001",
+    "S110",
+    "SIM115",
+    "SIM102",
+    "PIE810"
+]
+
