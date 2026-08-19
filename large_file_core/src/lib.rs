@@ -95,7 +95,6 @@ impl FileIndexCore {
                 })
                 .collect();
 
-            // sum::<usize>() 터보피시로 타입 추론 에러(E0283) 수정
             let total_lines: usize = chunks_offsets.iter().map(|c| c.len()).sum::<usize>() + 1;
             let mut final_offsets = Vec::with_capacity(total_lines);
             final_offsets.push(0u64);
@@ -140,6 +139,7 @@ impl FileIndexCore {
         let mmap = self.mmap.as_ref().unwrap().clone();
         let line_offsets = &self.line_offsets;
 
+        // 청크별 매칭된 라인 번호들을 수집 (개수 제한 없이 수집)
         let results: Result<Vec<Vec<usize>>, pyo3::PyErr> = py.allow_threads(|| {
             let chunk_size = 16 * 1024 * 1024; // 16MB
             let file_len = mmap.len();
@@ -164,14 +164,22 @@ impl FileIndexCore {
                         pyo3::exceptions::PyValueError::new_err(format!("Regex syntax error: {}", e))
                     })?;
 
+                let overlap: usize = 1024;
+
                 Ok(chunks
                     .into_par_iter()
                     .map(|(c_start, c_end)| {
-                        let sub_slice = &mmap[c_start..c_end];
+                        let search_end = std::cmp::min(c_end + overlap, file_len);
+                        let sub_slice = &mmap[c_start..search_end];
                         let mut local_indices = Vec::new();
                         let mut last_line_idx = None;
+                        let primary_len = c_end - c_start;
 
                         for m in re.find_iter(sub_slice) {
+                            // 오버랩 영역에서 시작된 매치는 다음 청크에서 처리하도록 제어
+                            if m.start() >= primary_len {
+                                break;
+                            }
                             let abs_offset = (c_start + m.start()) as u64;
                             let line_idx = match line_offsets.binary_search(&abs_offset) {
                                 Ok(idx) => idx,
@@ -181,9 +189,6 @@ impl FileIndexCore {
                             if Some(line_idx) != last_line_idx {
                                 local_indices.push(line_idx);
                                 last_line_idx = Some(line_idx);
-                                if local_indices.len() >= 2000 {
-                                    break;
-                                }
                             }
                         }
                         local_indices
@@ -210,9 +215,6 @@ impl FileIndexCore {
                             if Some(line_idx) != last_line_idx {
                                 local_indices.push(line_idx);
                                 last_line_idx = Some(line_idx);
-                                if local_indices.len() >= 2000 {
-                                    break;
-                                }
                             }
                         }
                         local_indices
@@ -221,19 +223,25 @@ impl FileIndexCore {
             }
         });
 
+        // 1. 모든 청크의 결과를 하나로 통합
         let mut final_indices = Vec::new();
         for mut chunk_res in results? {
             final_indices.append(&mut chunk_res);
         }
 
+        // 2. 청크 경계 중복 라인 제거 및 정렬
         final_indices.sort_unstable();
         final_indices.dedup();
 
+        // 3. 중복이 완전히 제거된 정확한 검색 라인 수 산출 (45건 오차 해결)
         let total_found = final_indices.len();
+
+        // 4. 반환할 표시용 결과 목록을 2000개로 상한 제한 (Truncate)
         if final_indices.len() > 2000 {
             final_indices.truncate(2000);
         }
 
+        // 5. Python 출력용 라인 문자열 생성
         let res_matches: Vec<String> = final_indices
             .iter()
             .map(|&idx| format!("Line {}", idx + 1))

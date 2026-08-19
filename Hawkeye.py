@@ -1369,11 +1369,31 @@ class UltimateLargeFileViewer(ctk.CTk):
                             lambda: self.on_complete_search_ui(matches, line_indices, total_found),
                         )
                     return
+                except ValueError as rust_regex_err:
+                    print(f"[디버그] Rust 정규식 오류: {rust_regex_err}")
+                    if self.winfo_exists():
+                        error_msg = str(rust_regex_err)
+                        self.after(
+                            0,
+                            lambda: messagebox.showerror(
+                                "정규식 오류",
+                                f"올바르지 않은 정규식 패턴입니다.\n\n{error_msg}",
+                            ),
+                        )
+                        self.after(
+                            0,
+                            lambda: self.lbl_search_status.configure(
+                                text="정규식 오류",
+                                text_color=self.COLOR_ERROR[self.theme_var.get()],
+                            ),
+                        )
+                        self.after(0, lambda: self.btn_search.configure(state="normal"))
+                    self.is_searching = False
+                    return
                 except Exception as rust_err:
                     print(f"[디버그] Rust 검색 예외 발생, 파이썬 모드로 전환: {rust_err}")
 
             k_bytes = keyword.encode(enc, errors="ignore")
-            matched_offsets = []
 
             with self.mmap_lock:
                 if self.mmap_obj is None:
@@ -1386,10 +1406,16 @@ class UltimateLargeFileViewer(ctk.CTk):
                     pattern_re = re.compile(k_bytes, re.MULTILINE)
                     with self.mmap_lock:
                         if self.mmap_obj is not None:
+                            last_line_idx = -1
                             for m in pattern_re.finditer(self.mmap_obj):
-                                matched_offsets.append(m.start())
-                                if len(matched_offsets) >= 2000:
-                                    break
+                                offset = m.start()
+                                line_idx = bisect.bisect_right(self.line_offsets, offset) - 1
+                                if line_idx != last_line_idx:
+                                    total_found += 1
+                                    if len(matches) < 2000:
+                                        matches.append(f"Line {line_idx + 1:,}")
+                                        line_indices.append(line_idx)
+                                    last_line_idx = line_idx
                 except re.error:
                     if self.winfo_exists():
                         self.after(
@@ -1411,6 +1437,7 @@ class UltimateLargeFileViewer(ctk.CTk):
                     return
             else:
                 search_pos = 0
+                last_line_idx = -1
                 while search_pos < file_size:
                     with self.mmap_lock:
                         if self.mmap_obj is None:
@@ -1419,24 +1446,38 @@ class UltimateLargeFileViewer(ctk.CTk):
 
                     if pos == -1:
                         break
-                    matched_offsets.append(pos)
-                    search_pos = pos + len(k_bytes)
-                    if len(matched_offsets) >= 2000:
-                        break
-
-            if matched_offsets:
-                last_line_idx = -1
-                for offset in matched_offsets:
-                    line_idx = bisect.bisect_right(self.line_offsets, offset) - 1
+                    
+                    line_idx = bisect.bisect_right(self.line_offsets, pos) - 1
                     if line_idx != last_line_idx:
                         total_found += 1
                         if len(matches) < 2000:
                             matches.append(f"Line {line_idx + 1:,}")
                             line_indices.append(line_idx)
                         last_line_idx = line_idx
+                    
+                    search_pos = pos + len(k_bytes)
 
         except Exception as e:
             print(f"Search exception: {e}")
+            if self.winfo_exists():
+                error_msg = str(e)
+                self.after(
+                    0,
+                    lambda: messagebox.showerror(
+                        "검색 오류",
+                        f"검색 중 예외가 발생했습니다.\n\n{error_msg}",
+                    ),
+                )
+                self.after(
+                    0,
+                    lambda: self.lbl_search_status.configure(
+                        text="검색 오류 발생",
+                        text_color=self.COLOR_ERROR[self.theme_var.get()],
+                    ),
+                )
+                self.after(0, lambda: self.btn_search.configure(state="normal"))
+            self.is_searching = False
+            return
 
         if self.winfo_exists():
             self.after(0, lambda: self.on_complete_search_ui(matches, line_indices, total_found))
